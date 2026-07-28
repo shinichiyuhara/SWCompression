@@ -1,4 +1,14 @@
-# SWCompression
+# SWCompression (fork)
+
+> **This is a fork of [tsolomko/SWCompression](https://github.com/tsolomko/SWCompression), branched at
+> release 4.9.1.** It adds 7-Zip BCJ branch filters and an Apple-platform fast path for LZMA/LZMA2.
+> See [Differences from upstream](#differences-from-upstream) below. Everything else — including this
+> README from here down — is upstream's.
+>
+> Upstream is the place to file issues about the library in general; this fork exists only to carry
+> the changes listed below until (and if) they land upstream.
+
+---
 
 [![Swift 5.9+](https://img.shields.io/badge/Swift-5.9+-blue.svg)](https://developer.apple.com/swift/)
 [![GitHub license](https://img.shields.io/badge/license-MIT-lightgrey.svg)](https://raw.githubusercontent.com/tsolomko/SWCompression/master/LICENSE)
@@ -197,3 +207,75 @@ completely in Swift without Objective-C, it can also be used on Linux, __and Win
 - [LZ4 Frame Format Description](https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md)
 - [LZ4 Block Format Description](https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md)
 - [xxHash specification](https://github.com/Cyan4973/xxHash/blob/dev/doc/xxhash_spec.md)
+
+---
+
+## Differences from upstream
+
+Branched at **4.9.1** (`03a68e6`). Two upstream files modified, three added.
+Everything else is byte-identical to upstream.
+
+### 1. 7-Zip BCJ branch filters (correctness)
+
+`Sources/7-Zip/BranchFilters.swift` (new), called from `7zFolder.swift`.
+
+7-Zip applies *branch converters* — BCJ, and its per-architecture variants —
+automatically when the input looks like machine code. A branch filter is not a
+compressor: it rewrites relative call/jump targets into absolute ones so that
+repeated calls become identical byte sequences, and the archive is unreadable
+without the inverse. Upstream implements none of them and throws
+`compressionNotSupported`, so **any `.7z` containing an executable fails to
+open**, which is a common archive rather than an exotic one.
+
+The algorithms are ports of XZ Utils' `src/liblzma/simple/*.c` (public domain),
+the same filter specification 7-Zip implements. Decode only.
+
+Deliberately not implemented: BCJ2 (a four-input-stream coder, rejected earlier
+by the folder decoder anyway), IA64, and RISC-V.
+
+### 2. LZMA/LZMA2 through Apple's `Compression` framework (speed)
+
+`Sources/Common/LZMAFraming.swift` (new), called from `7zFolder.swift`.
+
+7-Zip stores payloads as *raw* codec streams — no container, because the sizes
+and codec parameters live in the 7z header. `COMPRESSION_LZMA` refuses those,
+but accepts two containers, and in the shapes 7z produces those containers are
+a fixed preamble around the very same bytes. So the payload is framed, never
+transformed: LZMA2 into `.xz` (48 bytes of framing), LZMA1 into the legacy
+`.lzma` "alone" format (13 bytes). Two framings are needed because **xz cannot
+carry LZMA1 by specification**.
+
+Measured end-to-end (extraction to disk, two real archives): LZMA1
+28.9 → 40.8 MB/s, LZMA2+BCJ 62.1 → 77.6 MB/s. The in-memory decode alone runs
+far faster, but real extraction is bounded by disk writes, so **2–3x is the
+honest figure**.
+
+The pure-Swift decoder remains and is used whenever framing does not apply.
+7z stores a CRC-32 per entry, so a mis-framed decode fails verification rather
+than producing plausible garbage — a wrong fast path cannot pass silently.
+
+Guarded by `#if canImport(Compression)`; on Linux, Windows, Android and WASI
+this compiles away and upstream's behaviour is unchanged.
+
+### 3. Progress reporting for long decodes (usability)
+
+`Sources/Common/DecodeProgress.swift` (new), one line in `LZMA2Decoder.swift`.
+
+A solid 7z is usually one folder, decoded in a single call that yields nothing
+until it finishes — a progress bar sits at 0% and then jumps to 100%, which
+reads as a hang. A thread-local sink, opt-in and a no-op when unset, is ticked
+once per LZMA2 chunk. Thread-local rather than a parameter so that the patch
+stays one line inside upstream code instead of a signature change threaded
+through four files.
+
+### Verification
+
+The 86 upstream files carried over were checked byte-for-byte against 4.9.1.
+The decoder changes were validated by extracting real archives and comparing
+every output file against `7zz`: 4,796 files, zero mismatches, and zero silent
+fallbacks.
+
+### Upstreaming
+
+These changes are offered upstream; the fork exists to carry them in the
+meantime. If they land, this fork should be retired rather than maintained.
