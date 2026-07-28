@@ -190,7 +190,15 @@ enum LZMAFraming {
                 status = compression_stream_process(
                     &stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
                 let produced = bufferSize - stream.dst_size
-                if produced > 0 { out.append(buffer, count: produced) }
+                if produced > 0 {
+                    out.append(buffer, count: produced)
+                    // Report from here, not only from LZMA2Decoder's chunk loop.
+                    // This path decodes a whole folder inside one framework call
+                    // and never enters that loop, so without this line making 7z
+                    // FASTER made a host app's progress bar stop moving — the
+                    // exact failure DecodeProgress was written to prevent.
+                    DecodeProgress.tick(out.count)
+                }
                 stream.dst_ptr = buffer
                 stream.dst_size = bufferSize
             } while status == COMPRESSION_STATUS_OK

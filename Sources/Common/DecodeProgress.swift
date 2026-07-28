@@ -19,8 +19,13 @@
 // -> LZMA2.decompress -> LZMA2Decoder.decode, i.e. editing four upstream files.
 // This fork's whole maintenance argument is that the patch stays small enough
 // to re-apply by hand at every version bump, so the cost is paid here instead:
-// ONE line in LZMA2Decoder's chunk loop, and everything else lives in this
-// file, which upstream does not have and therefore cannot conflict with.
+// one line in LZMA2Decoder's chunk loop, one in LZMAFraming's output loop, and
+// everything else lives in this file, which upstream does not have and
+// therefore cannot conflict with.
+//
+// BOTH tick sites are required. The system fast path decodes a whole folder in
+// one framework call and never enters LZMA2Decoder's loop, so ticking only
+// there means the bar freezes precisely when decoding is fastest.
 //
 // Thread-local, not global, because a host app may decode several archives
 // concurrently and a shared sink would interleave them. SWCompression decodes
@@ -35,23 +40,33 @@ public enum DecodeProgress {
     // Namespaced to the library, not to any host app — matching the sibling key
     // in `noteFallback` below. Thread-dictionary keys only need to be unique
     // within the process, so the short form suffices.
-    private static let key = "swcompression.decode.progress"
+    fileprivate static let key = "swcompression.decode.progress"
 
-    /// Box so the closure survives in the (Objective-C) thread dictionary.
+    /// Box so the closures survive in the (Objective-C) thread dictionary.
     private final class Sink {
         let report: (Int) -> Void
-        init(_ report: @escaping (Int) -> Void) { self.report = report }
+        let fallback: ((String) -> Void)?
+        init(_ report: @escaping (Int) -> Void, _ fallback: ((String) -> Void)?) {
+            self.report = report
+            self.fallback = fallback
+        }
     }
 
     /// Run `body` with `report` receiving the running count of decoded bytes.
     ///
+    /// `onFallback`, if given, is called with the coder name when the system
+    /// decoder declines a stream and the pure-Swift path runs instead. Pass it
+    /// to route that into a real log: the default writes to stderr, which in a
+    /// GUI app nobody ever reads.
+    ///
     /// Nested calls are supported: the previous sink is restored on exit, so an
     /// inner decode cannot leave a stale sink installed for the outer one.
     public static func withSink<T>(_ report: @escaping (Int) -> Void,
+                                   onFallback: ((String) -> Void)? = nil,
                                    _ body: () throws -> T) rethrows -> T {
         let dict = Thread.current.threadDictionary
         let previous = dict[key]
-        dict[key] = Sink(report)
+        dict[key] = Sink(report, onFallback)
         defer { dict[key] = previous }
         return try body()
     }
@@ -75,12 +90,19 @@ extension DecodeProgress {
     /// "why is 7z still slow?" has no answer in the log, and a framing bug that
     /// disables the fast path everywhere would look exactly like success.
     /// Thread-local like the progress sink, so concurrent jobs do not mix.
+    ///
+    /// Goes to the host's `onFallback` when one was installed, and to stderr
+    /// otherwise. stderr alone is not enough for a GUI app — the message lands
+    /// where no user or bug report will ever include it.
     static func noteFallback(_ coder: String) {
         let key = "swcompression.lzma.fallback"
         let d = Thread.current.threadDictionary
         let count = (d[key] as? Int ?? 0) + 1
         d[key] = count
-        if count <= 3 {          // once per coder is the signal; a flood is noise
+        guard count <= 3 else { return }   // once per coder is the signal; a flood is noise
+        if let sink = d[Self.key] as? Sink, let report = sink.fallback {
+            report(coder)
+        } else {
             FileHandle.standardError.write(
                 Data("LZMAFraming: fell back to pure-Swift \(coder) decoder\n".utf8))
         }

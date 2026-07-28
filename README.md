@@ -259,14 +259,23 @@ this compiles away and upstream's behaviour is unchanged.
 
 ### 3. Progress reporting for long decodes (usability)
 
-`Sources/Common/DecodeProgress.swift` (new), one line in `LZMA2Decoder.swift`.
+`Sources/Common/DecodeProgress.swift` (new), one line in `LZMA2Decoder.swift`,
+one in `LZMAFraming.swift`.
 
 A solid 7z is usually one folder, decoded in a single call that yields nothing
 until it finishes — a progress bar sits at 0% and then jumps to 100%, which
 reads as a hang. A thread-local sink, opt-in and a no-op when unset, is ticked
-once per LZMA2 chunk. Thread-local rather than a parameter so that the patch
+once per output chunk. Thread-local rather than a parameter so that the patch
 stays one line inside upstream code instead of a signature change threaded
 through four files.
+
+Both decode paths tick. Ticking only the pure-Swift loop would freeze the bar
+precisely when decoding is fastest, because the system path never enters that
+loop — measured on a real archive, 17.6 seconds of decode with the bar at 0%.
+
+The sink optionally carries an `onFallback` callback so a host can log when the
+system path declines a stream. Without one, that notice goes to stderr, which in
+a GUI application no one reads.
 
 ### Verification
 
