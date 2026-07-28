@@ -33,6 +33,10 @@ struct LZMA2Decoder {
     /// Main LZMA2 decoder function.
     mutating func decode() throws {
         mainLoop: while true {
+            // LOCAL PATCH (fork): one call per LZMA2 chunk (<=2 MB), so a
+            // long solid decode can drive a progress bar instead of appearing
+            // hung. No-op unless a sink is installed. See Common/DecodeProgress.swift.
+            DecodeProgress.tick(self.decoder.out.count)
             let controlByte = byteReader.byte()
             switch controlByte {
             case 0:

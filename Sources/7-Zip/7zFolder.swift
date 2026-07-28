@@ -156,7 +156,23 @@ class SevenZipFolder {
                     properties.count == 1
                     else { throw LZMA2Error.wrongDictionarySize }
 
+                // LOCAL PATCH (fork): try the system decoder first. It is several
+                // times faster than the pure-Swift one below. Framing can fail on
+                // stream shapes LZMAFraming does not model, so the original path
+                // stays as the fallback — and 7z's per-entry CRC-32 catches a
+                // mis-framed decode, so a wrong answer here cannot pass silently.
+                #if canImport(Compression)
+                if let fast = try? LZMAFraming.decodeLZMA2(decodedData,
+                                                          dictionarySizeProperty: properties[0],
+                                                          uncompressedSize: unpackSize) {
+                    decodedData = fast
+                } else {
+                    DecodeProgress.noteFallback("LZMA2")
+                    decodedData = try LZMA2.decompress(LittleEndianByteReader(data: decodedData), properties[0])
+                }
+                #else
                 decodedData = try LZMA2.decompress(LittleEndianByteReader(data: decodedData), properties[0])
+                #endif
             case .lzma:
                 // Both properties' byte (lp, lc, pb) and dictionary size are stored in coder's properties.
                 guard let properties = coder.properties,
@@ -167,10 +183,27 @@ class SevenZipFolder {
                 for i in 1..<5 {
                     dictionarySize |= properties[i].toInt() << (8 * (i - 1))
                 }
+                // LOCAL PATCH (fork): same as LZMA2 above, but wrapped in the
+                // legacy `.lzma` framing — the xz container cannot carry LZMA1 by
+                // specification, and real archives do use it (`Method = LZMA:24`).
+                #if canImport(Compression)
+                if let fast = try? LZMAFraming.decodeLZMA1(decodedData,
+                                                          properties: Data(properties),
+                                                          uncompressedSize: unpackSize) {
+                    decodedData = fast
+                } else {
+                    DecodeProgress.noteFallback("LZMA")
+                    let lzmaProperties = try LZMAProperties(lzmaByte: properties[0], dictionarySize)
+                    decodedData = try LZMA.decompress(data: decodedData,
+                                                      properties: lzmaProperties,
+                                                      uncompressedSize: unpackSize)
+                }
+                #else
                 let lzmaProperties = try LZMAProperties(lzmaByte: properties[0], dictionarySize)
                 decodedData = try LZMA.decompress(data: decodedData,
                                                   properties: lzmaProperties,
                                                   uncompressedSize: unpackSize)
+                #endif
             default:
                 if coder.id == [0x03] {
                     guard let properties = coder.properties,
@@ -180,6 +213,19 @@ class SevenZipFolder {
                     decodedData = DeltaFilter.decode(LittleEndianByteReader(data: decodedData), (properties[0] &+ 1).toInt())
                 } else if coder.id == [0x04, 0xF7, 0x11, 0x04] {
                     decodedData = try LZ4.decompress(data: decodedData)
+                } else if let branchDecode = BranchFilter.decoder(for: coder.id) {
+                    // LOCAL PATCH (fork): branch converters ("BCJ"). 7-Zip
+                    // applies these to executables by default, so without them
+                    // any .7z holding a binary fails outright. See
+                    // 7-Zip/BranchFilters.swift and README.md.
+                    //
+                    // A branch filter does not change the length, so the
+                    // `unpackSize` check after this loop still applies. It is
+                    // the LAST coder in the chain (data flows LZMA2 -> BCJ),
+                    // which `orderedCoders()` already guarantees.
+                    var bytes = [UInt8](decodedData)
+                    branchDecode(&bytes)
+                    decodedData = Data(bytes)
                 } else if coder.isEncryptionMethod {
                     throw SevenZipError.encryptionNotSupported
                 } else {
