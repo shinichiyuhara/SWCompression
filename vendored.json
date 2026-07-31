@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "このリポジトリは取り込み (vendoring) ではなく fork である。",
+    "規約: ~/Developer/Claude/Conventions/vendored-source-conventions.jp.md §6.2.4。",
+    "SHA-256 マニフェストを持たないのは、上流とのズレを git の merge-base が",
+    "より正確に追えるため。ハッシュを二重に持つと、片方だけ更新された時点で",
+    "どちらが現在の事実か分からなくなる。"
+  ],
+  "vendored": [],
+  "forks": [
+    {
+      "name": "SWCompression",
+      "upstream": "tsolomko/SWCompression",
+      "upstream_ref": "upstream/develop",
+      "merge_base": "56267f0e14c582f991ee3cc725fbe03b09ac5e3a",
+      "branched_at": "4.9.1",
+      "license": "MIT",
+      "doc": "VENDORED.md",
+      "why": "7-Zip は入力が機械語に見えると BCJ 分岐フィルタを自動適用するが、上流はそれを 1 つも実装しておらず compressionNotSupported で落ちる。実行ファイルを含む 7z / cb7 が開けなかった。あわせて LZMA/LZMA2 を Apple の Compression に通す高速経路と、復号の進捗通知を追加している。",
+      "review": {
+        "last_checked": "2026-07-31",
+        "checked_through": "56267f0e14c582f991ee3cc725fbe03b09ac5e3a",
+        "verdict": "adopted",
+        "note": "4.9.1 (hotfix-4.9.1 merge, 03a68e67) から分岐。checked_through はその merge-base で、そこまでの上流を読んだ時点を指す。2026-07-31 時点で upstream/develop は merge-base から 54 コミット進んでおり、それらは未読。追随の判断は VENDORED.md の『更新手順』に従う。上流に提案済みで、採用されれば fork を畳んで上流 URL に戻す。"
+      }
+    }
+  ]
+}
