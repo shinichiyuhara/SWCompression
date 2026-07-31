@@ -19,9 +19,9 @@
       "why": "7-Zip は入力が機械語に見えると BCJ 分岐フィルタを自動適用するが、上流はそれを 1 つも実装しておらず compressionNotSupported で落ちる。実行ファイルを含む 7z / cb7 が開けなかった。あわせて LZMA/LZMA2 を Apple の Compression に通す高速経路と、復号の進捗通知を追加している。",
       "review": {
         "last_checked": "2026-07-31",
-        "checked_through": "56267f0e14c582f991ee3cc725fbe03b09ac5e3a",
+        "checked_through": "83689e0a",
         "verdict": "adopted",
-        "note": "4.9.1 (hotfix-4.9.1 merge, 03a68e67) から分岐。checked_through はその merge-base で、そこまでの上流を読んだ時点を指す。2026-07-31 時点で upstream/develop は merge-base から 54 コミット進んでおり、それらは未読。追随の判断は VENDORED.md の『更新手順』に従う。上流に提案済みで、採用されれば fork を畳んで上流 URL に戻す。"
+        "note": "merge-base 56267f0e から upstream/develop 83689e0a までの 54 コミットを 全件読んだ（2026-07-31、Pinakeion のセキュリティレビューの一環）。**security fix は 1 件も無い。** 内訳: テストの Swift Testing 移行 約20、CI 約8、Sendable 適合の付与 約8、swcomp（CLI・本アプリ未使用）の整理 5、Swift 6 言語モード/最低 OS の引き上げ 3。ライブラリ本体の差分は 15 ファイル +18/-34 で、**中身は全て `Sendable` 注釈**。唯一の非注釈が ZIP の customExtraFields を nonisolated(unsafe) にしたもので、上流自身が TODO で『同期は文書頼み』と認めている弱化——追随の動機にならない。**LZMA / LZMA2 / 7z / Deflate / BZip2 / XZ には 1 行も変更が無い**（＝信頼できないバイトを解析する当の部分は無風）。hotfix-4.9.1 の中身は merge-base 以前で取り込み済み。よって追随は急がない。次に見る人は 83689e0a より後だけ読めばよい。上流に提案済みで、採用されれば fork を畳んで上流 URL に戻す。"
       }
     }
   ]
