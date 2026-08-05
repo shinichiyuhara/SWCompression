@@ -17,6 +17,30 @@
       "license": "MIT",
       "doc": "VENDORED.md",
       "why": "7-Zip は入力が機械語に見えると BCJ 分岐フィルタを自動適用するが、上流はそれを 1 つも実装しておらず compressionNotSupported で落ちる。実行ファイルを含む 7z / cb7 が開けなかった。あわせて LZMA/LZMA2 を Apple の Compression に通す高速経路と、復号の進捗通知を追加している。",
+      "released_as": "4.9.1-sy.N",
+      "consumers_note": "この fork を SPM の exact 依存で引いているアプリ。**新しいタグを切ったらこの一覧に配る**。ここに置くのは、配布先がタグを切る場所から引けないと、誰かの記憶（実際 4.9.1-sy.1→sy.2 の横展開は Demion の MEMORY.md にしか書かれていなかった）に依存するため。各アプリ側の検知は scripts/check-dependencies.py が担う。",
+      "consumers": [
+        {
+          "app": "Demion",
+          "repo": "~/Developer/Claude/Demion",
+          "pin": "exact 4.9.1-sy.2"
+        },
+        {
+          "app": "Arkheion",
+          "repo": "~/Developer/Claude/Arkheion",
+          "pin": "exact 4.9.1-sy.2"
+        },
+        {
+          "app": "Skopeion",
+          "repo": "~/Developer/Claude/Skopeion",
+          "pin": "exact 4.9.1-sy.2"
+        },
+        {
+          "app": "Pinakeion",
+          "repo": "~/Developer/Claude/Pinakeion",
+          "pin": "exact 4.9.1-sy.2"
+        }
+      ],
       "review": {
         "last_checked": "2026-07-31",
         "checked_through": "83689e0a",
