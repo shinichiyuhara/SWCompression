@@ -230,6 +230,11 @@ public class BZip2: DecompressionAlgorithm {
             }
             if runLength > 0 {
                 // There might have been a repeat run right before EOS symbol.
+                // `usedSymbols` is built from the block's symbol bitmap; a
+                // corrupt bitmap can leave it empty, and `usedSymbols[0]` then
+                // traps. Reject rather than index out of range.
+                guard !usedSymbols.isEmpty
+                    else { throw BZip2Error.corruptedData }
                 for _ in 0..<runLength {
                     buffer.append(usedSymbols[0])
                 }
@@ -239,12 +244,24 @@ public class BZip2: DecompressionAlgorithm {
             if symbol == usedSymbolsCount - 1 { // End of stream symbol.
                 break
             }
-            // Move to front inverse.
+            // Move to front inverse. `symbol` is Huffman-decoded from the
+            // (attacker-controlled) stream; a value that does not address a
+            // current move-to-front entry makes `remove(at:)` trap. Treat an
+            // out-of-range index as corruption.
+            guard symbol - 1 >= 0, symbol - 1 < usedSymbols.count
+                else { throw BZip2Error.symbolNotFound }
             let element = usedSymbols.remove(at: symbol - 1)
             usedSymbols.insert(element, at: 0)
             buffer.append(element)
         }
 
+        // The Burrows-Wheeler pointer is read verbatim from the block header
+        // (24 bits). `reverse` seeds its walk with `pointers[pointer]`; a
+        // pointer outside the decoded block indexes the array out of range —
+        // an uncatchable Array trap. (An empty block is handled inside
+        // `reverse`, which returns early.)
+        guard buffer.isEmpty || (pointer >= 0 && pointer < buffer.count)
+            else { throw BZip2Error.corruptedData }
         let nt = BurrowsWheeler.reverse(bytes: buffer, pointer)
 
         // Run Length Decoding

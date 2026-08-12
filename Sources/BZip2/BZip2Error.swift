@@ -28,6 +28,11 @@ public enum BZip2Error: Error {
     case wrongHuffmanCodeLength
     /// Symbol wasn't found in Huffman tree.
     case symbolNotFound
+    /// A structural value taken from the compressed stream (e.g. the Burrows-Wheeler
+    /// pointer, or a move-to-front index) points outside the decoded block. Such a
+    /// value would index a Swift array out of range — an uncatchable trap — so it is
+    /// rejected as corruption instead.
+    case corruptedData
     /**
      Computed checksum of the uncompressed data does not match the value stored in the archive.
      Associated value contains the data that were successfully decompressed up to the point where the mismatch was
