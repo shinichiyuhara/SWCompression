@@ -40,14 +40,24 @@ class SevenZipHeader {
     }
 
     convenience init(_ bitReader: MsbBitReader, using streamInfo: SevenZipStreamInfo) throws {
-        let folder = streamInfo.coderInfo.folders[0]
-        guard let packInfo = streamInfo.packInfo
+        // All three lookups below index arrays that a corrupt header can leave
+        // empty, and the offset/size can point outside the buffer — each an
+        // uncatchable trap. Validate before use.
+        guard let packInfo = streamInfo.packInfo,
+              !streamInfo.coderInfo.folders.isEmpty,
+              !packInfo.packSizes.isEmpty
             else { throw SevenZipError.internalStructureError }
+        let folder = streamInfo.coderInfo.folders[0]
 
         let folderOffset = SevenZipContainer.signatureHeaderSize + packInfo.packPosition
+        let packSize = packInfo.packSizes[0]
+        guard folderOffset >= 0, packSize >= 0,
+              folderOffset <= bitReader.size,
+              packSize <= bitReader.size - folderOffset
+            else { throw SevenZipError.internalStructureError }
         bitReader.offset = folderOffset
 
-        let packedHeaderData = Data(bitReader.bytes(count: packInfo.packSizes[0]))
+        let packedHeaderData = Data(bitReader.bytes(count: packSize))
         let headerData = try folder.unpack(data: packedHeaderData)
 
         guard headerData.count == folder.unpackSize()

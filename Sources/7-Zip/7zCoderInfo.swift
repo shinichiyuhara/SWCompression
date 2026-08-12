@@ -21,7 +21,7 @@ class SevenZipCoderInfo {
         var type = bitReader.byte()
         guard type == 0x0B else { throw SevenZipError.internalStructureError }
 
-        numFolders = bitReader.szMbd()
+        numFolders = try bitReader.szMbd()
         external = bitReader.byte()
 
         guard external == 0
@@ -36,14 +36,14 @@ class SevenZipCoderInfo {
 
         for folder in folders {
             for _ in 0..<folder.totalOutputStreams {
-                folder.unpackSizes.append(bitReader.szMbd())
+                folder.unpackSizes.append(try bitReader.szMbd())
             }
         }
 
         type = bitReader.byte()
 
         if type == 0x0A {
-            let definedBits = bitReader.defBits(count: numFolders)
+            let definedBits = try bitReader.defBits(count: numFolders)
             bitReader.align()
 
             for i in 0..<numFolders where definedBits[i] == 1 {

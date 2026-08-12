@@ -24,7 +24,7 @@ struct SevenZipProperty {
             if propertyType == 0 {
                 break
             }
-            let propertySize = bitReader.szMbd()
+            let propertySize = try bitReader.szMbd()
             properties.append(SevenZipProperty(propertyType, propertySize, bitReader.bytes(count: propertySize)))
         }
         return properties

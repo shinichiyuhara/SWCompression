@@ -96,8 +96,19 @@ public class SevenZipContainer: Container {
                     }
                 }
 
+                // The pack offset and sizes come from the header; the running
+                // offset above, the stream index, and the size below can all
+                // point outside the buffer on a corrupt file — each an
+                // uncatchable trap. Validate before reading.
+                guard streamIndex < packInfo.packSizes.count
+                    else { throw SevenZipError.internalStructureError }
+                let packSize = packInfo.packSizes[streamIndex]
+                guard byteReader.offset >= 0, packSize >= 0,
+                      byteReader.offset <= byteReader.size,
+                      packSize <= byteReader.size - byteReader.offset
+                    else { throw SevenZipError.internalStructureError }
                 // Load the stream.
-                let streamData = Data(byteReader.bytes(count: packInfo.packSizes[streamIndex]))
+                let streamData = Data(byteReader.bytes(count: packSize))
 
                 // Check stream's CRC, if it's available.
                 if streamIndex < packInfo.digests.count,

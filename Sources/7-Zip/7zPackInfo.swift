@@ -13,20 +13,20 @@ class SevenZipPackInfo {
     private(set) var digests = [UInt32?]()
 
     init(_ bitReader: MsbBitReader) throws {
-        packPosition = bitReader.szMbd()
-        numPackStreams = bitReader.szMbd()
+        packPosition = try bitReader.szMbd()
+        numPackStreams = try bitReader.szMbd()
 
         var type = bitReader.byte()
 
         if type == 0x09 {
             for _ in 0..<numPackStreams {
-                packSizes.append(bitReader.szMbd())
+                packSizes.append(try bitReader.szMbd())
             }
             type = bitReader.byte()
         }
 
         if type == 0x0A {
-            let definedBits = bitReader.defBits(count: numPackStreams)
+            let definedBits = try bitReader.defBits(count: numPackStreams)
             bitReader.align()
 
             for bit in definedBits {

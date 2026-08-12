@@ -19,7 +19,7 @@ class SevenZipSubstreamInfo {
         if type == 0x0D {
             totalUnpackStreams = 0
             for folder in coderInfo.folders {
-                let numStreams = bitReader.szMbd()
+                let numStreams = try bitReader.szMbd()
                 folder.numUnpackSubstreams = numStreams
                 totalUnpackStreams += numStreams
             }
@@ -33,7 +33,7 @@ class SevenZipSubstreamInfo {
             var sum = 0
             if type == 0x09 {
                 for _ in 0..<folder.numUnpackSubstreams - 1 {
-                    let size = bitReader.szMbd()
+                    let size = try bitReader.szMbd()
                     unpackSizes.append(size)
                     sum += size
                 }
@@ -52,7 +52,7 @@ class SevenZipSubstreamInfo {
         }
 
         if type == 0x0A {
-            let definedBits = bitReader.defBits(count: totalDigests)
+            let definedBits = try bitReader.defBits(count: totalDigests)
             bitReader.align()
 
             var missingCrcs = [UInt32?]()

@@ -14,8 +14,8 @@ class SevenZipFolder {
         let outIndex: Int
 
         init(_ bitReader: MsbBitReader) throws {
-            inIndex = bitReader.szMbd()
-            outIndex = bitReader.szMbd()
+            inIndex = try bitReader.szMbd()
+            outIndex = try bitReader.szMbd()
         }
 
     }
@@ -44,7 +44,7 @@ class SevenZipFolder {
     }()
 
     init(_ bitReader: MsbBitReader) throws {
-        numCoders = bitReader.szMbd()
+        numCoders = try bitReader.szMbd()
         for _ in 0..<numCoders {
             let coder = try SevenZipCoder(bitReader)
             coders.append(coder)
@@ -80,7 +80,7 @@ class SevenZipFolder {
             packedStreams.append(i)
         } else {
             for _ in 0..<numPackedStreams {
-                packedStreams.append(bitReader.szMbd())
+                packedStreams.append(try bitReader.szMbd())
             }
         }
     }

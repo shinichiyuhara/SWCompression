@@ -25,7 +25,7 @@ class SevenZipFileInfo {
     var unknownProperties = [SevenZipProperty]()
 
     init(_ bitReader: MsbBitReader) throws {
-        numFiles = bitReader.szMbd()
+        numFiles = try bitReader.szMbd()
         for _ in 0..<numFiles {
             files.append(File())
         }
@@ -39,7 +39,7 @@ class SevenZipFileInfo {
             if propertyType == 0 {
                 break
             }
-            let propertySize = bitReader.szMbd()
+            let propertySize = try bitReader.szMbd()
             switch propertyType {
             case 0x0E: // EmptyStream
                 isEmptyStream = bitReader.bits(count: numFiles)
@@ -71,7 +71,7 @@ class SevenZipFileInfo {
                 guard nextFile == numFiles
                     else { throw SevenZipError.internalStructureError }
             case 0x12: // Creation time
-                let timesDefined = bitReader.defBits(count: numFiles)
+                let timesDefined = try bitReader.defBits(count: numFiles)
                 bitReader.align()
                 let external = bitReader.byte()
                 guard external == 0
@@ -81,7 +81,7 @@ class SevenZipFileInfo {
                     files[i].cTime = Date(bitReader.uint64())
                 }
             case 0x13: // Access time
-                let timesDefined = bitReader.defBits(count: numFiles)
+                let timesDefined = try bitReader.defBits(count: numFiles)
                 bitReader.align()
 
                 let external = bitReader.byte()
@@ -92,7 +92,7 @@ class SevenZipFileInfo {
                     files[i].aTime = Date(bitReader.uint64())
                 }
             case 0x14: // Modification time
-                let timesDefined = bitReader.defBits(count: numFiles)
+                let timesDefined = try bitReader.defBits(count: numFiles)
                 bitReader.align()
 
                 let external = bitReader.byte()
@@ -103,7 +103,7 @@ class SevenZipFileInfo {
                     files[i].mTime = Date(bitReader.uint64())
                 }
             case 0x15: // WinAttributes
-                let attributesDefined = bitReader.defBits(count: numFiles)
+                let attributesDefined = try bitReader.defBits(count: numFiles)
                 bitReader.align()
 
                 let external = bitReader.byte()
