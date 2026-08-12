@@ -33,31 +33,39 @@ struct TarExtendedHeader {
         var i = data.startIndex
         while i < data.endIndex {
             let lengthStartIndex = i
-            while data[i] != 0x20 {
+            // Each scan below advances `i` towards a delimiter; the PAX record
+            // may be malformed (no space, no '=', no trailing newline) or its
+            // declared length may run past the buffer. Every `data[i]` read is
+            // now bounded by `data.endIndex` — reading past it is a Swift trap,
+            // not a throwable error, which crashes the host process. A record
+            // that ends before its delimiter is rejected as malformed.
+            while i < data.endIndex && data[i] != 0x20 {
                 i += 1
             }
-            guard let lengthString = String(data: data[lengthStartIndex..<i], encoding: .utf8),
+            guard i < data.endIndex,
+                  let lengthString = String(data: data[lengthStartIndex..<i], encoding: .utf8),
                   let length = Int(lengthString)
                 else { throw TarError.wrongPaxHeaderEntry }
 
             i += 1
             let keyStartIndex = i
-            while data[i] != 0x3D {
+            while i < data.endIndex && data[i] != 0x3D {
                 i += 1
             }
-            guard let key = String(data: data[keyStartIndex..<i], encoding: .utf8)
+            guard i < data.endIndex,
+                  let key = String(data: data[keyStartIndex..<i], encoding: .utf8)
                 else { throw TarError.wrongPaxHeaderEntry }
 
             i += 1
             var valueBytes = [UInt8]()
             // Length includes the trailing newline character.
-            while i - lengthStartIndex + 1 < length {
+            while i < data.endIndex && i - lengthStartIndex + 1 < length {
                 valueBytes.append(data[i])
                 i += 1
             }
 
             // Check and skip trailing newline character.
-            guard data[i] == 0x0A
+            guard i < data.endIndex, data[i] == 0x0A
                 else { throw TarError.wrongPaxHeaderEntry }
             i += 1
 
