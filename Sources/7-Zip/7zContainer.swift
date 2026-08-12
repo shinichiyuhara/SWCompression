@@ -231,6 +231,23 @@ public class SevenZipContainer: Container {
         guard CheckSums.crc32(bitReader.bytes(count: 20)) == startHeaderCRC
             else { throw SevenZipError.wrongCRC }
 
+        // The metadata header lives at [32 + nextHeaderOffset, + nextHeaderSize),
+        // both taken from the (attacker-controlled) signature header and relative
+        // to the end of the 32-byte SignatureHeader. A truncated or corrupt file
+        // can put that region partly or wholly outside the buffer; the reads
+        // below (the type byte at `headerStartIndex`, and the `bytes(count:
+        // nextHeaderSize)` CRC pass) then index past the end, which is a Swift
+        // trap — uncatchable, crashing the host process. Reject up front.
+        // Subtraction avoids overflowing on a huge declared offset/size.
+        // NOTE: this closes the truncation / out-of-range-region class. Interior
+        // corruption whose region stays in-bounds is still parsed by the nested
+        // readers below and can over-read within them; hardening those is tracked
+        // separately.
+        guard nextHeaderOffset >= 0, nextHeaderSize >= 0,
+              nextHeaderOffset <= data.count - 32,
+              nextHeaderSize <= data.count - 32 - nextHeaderOffset
+            else { throw SevenZipError.wrongSize }
+
         // **Header**
         bitReader.offset += nextHeaderOffset
         if bitReader.isFinished {

@@ -48,6 +48,20 @@ struct TarParser {
         assert(header.blockStartIndex >= 0)
         let dataStartIndex = header.blockStartIndex + 512
 
+        // `header.size` is taken from the attacker-controlled header. A value
+        // that pushes the entry's data region past the end of the buffer, or a
+        // negative size, makes the `reader.data[dataStartIndex..<dataEndIndex]`
+        // slices and the `tarCString` reads below index out of range — a Swift
+        // trap, not a throwable error, which crashes the host process and can
+        // never be caught by `try?`. The parser already models a short buffer
+        // as `.truncated`; treat an out-of-range declared size the same way.
+        // Subtraction (not addition) avoids overflowing on a huge base-256 size.
+        guard header.size >= 0,
+              dataStartIndex >= 0,
+              dataStartIndex <= reader.size,
+              header.size <= reader.size - dataStartIndex
+            else { return .truncated }
+
         if case .special(let specialEntryType) = header.type {
             switch specialEntryType {
             case .globalExtendedHeader:
