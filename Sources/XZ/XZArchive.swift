@@ -96,6 +96,11 @@ public class XZArchive: Archive {
         var blockInfos: [(unpaddedSize: Int, uncompSize: Int)] = []
         var indexSize = -1
         while true {
+            // The block-header-size byte, and the per-block check value that
+            // follows a block, are read without the reader guaranteeing they
+            // exist; a truncated stream would make these index past the end.
+            guard byteReader.bytesLeft >= 1
+                else { throw XZError.wrongField }
             let blockHeaderSize = byteReader.byte()
             if blockHeaderSize == 0 { // Zero value of blockHeaderSize means that we've encountered the index.
                 indexSize = try processIndex(blockInfos, byteReader)
@@ -103,6 +108,8 @@ public class XZArchive: Archive {
             } else {
                 let block = try XZBlock(blockHeaderSize, byteReader, streamHeader.checkType.size)
                 out.append(block.data)
+                guard byteReader.bytesLeft >= streamHeader.checkType.size
+                    else { throw XZError.wrongField }
                 switch streamHeader.checkType {
                 case .none:
                     break
@@ -149,6 +156,8 @@ public class XZArchive: Archive {
         var indexSize = byteReader.offset - indexStartIndex
         if indexSize % 4 != 0 {
             let paddingSize = 4 - indexSize % 4
+            guard byteReader.bytesLeft >= paddingSize
+                else { throw XZError.wrongField }
             for _ in 0..<paddingSize {
                 let byte = byteReader.byte()
                 guard byte == 0x00
@@ -157,6 +166,8 @@ public class XZArchive: Archive {
             }
         }
 
+        guard byteReader.bytesLeft >= 4
+            else { throw XZError.wrongField }
         let indexCRC = byteReader.uint32()
         byteReader.offset = indexStartIndex
         guard CheckSums.crc32(byteReader.bytes(count: indexSize)) == indexCRC
@@ -168,6 +179,11 @@ public class XZArchive: Archive {
 
     private static func processFooter(_ streamHeader: XZStreamHeader, _ indexSize: Int,
                                       _ byteReader: LittleEndianByteReader) throws {
+        // The stream footer is a fixed 12 bytes (CRC 4 + backward-size 4 +
+        // flags 2 + "YZ" magic 2). A file truncated inside it would make the
+        // reads below index past the end.
+        guard byteReader.bytesLeft >= 12
+            else { throw XZError.wrongMagic }
         let footerCRC = byteReader.uint32()
         /// Indicates the size of Index field. Should match its real size.
         let backwardSize = (byteReader.int(fromBytes: 4) + 1) * 4

@@ -37,15 +37,20 @@ struct LZMA2Decoder {
             // long solid decode can drive a progress bar instead of appearing
             // hung. No-op unless a sink is installed. See Common/DecodeProgress.swift.
             DecodeProgress.tick(self.decoder.out.count)
+            // A well-formed LZMA2 stream ends with a 0x00 control byte; if the
+            // input runs out before it, reading the next control byte would
+            // trap. Treat a missing end marker as truncation.
+            guard byteReader.bytesLeft >= 1
+                else { throw LZMA2Error.wrongControlByte }
             let controlByte = byteReader.byte()
             switch controlByte {
             case 0:
                 break mainLoop
             case 1:
                 self.decoder.resetDictionary()
-                self.decodeUncompressed()
+                try self.decodeUncompressed()
             case 2:
-                self.decodeUncompressed()
+                try self.decodeUncompressed()
             case 3...0x7F:
                 throw LZMA2Error.wrongControlByte
             case 0x80...0xFF:
@@ -60,6 +65,12 @@ struct LZMA2Decoder {
     private mutating func dispatch(_ controlByte: UInt8) throws {
         let uncompressedSizeBits = controlByte & 0x1F
         let reset = (controlByte & 0x60) >> 5
+        // The chunk header is 4 more bytes (two 16-bit sizes); a compressed
+        // chunk with reset >= 2 then reads a 1-byte properties field, and the
+        // compressed data itself follows. Verify each region is present before
+        // reading it, so a truncated chunk throws rather than trapping.
+        guard self.byteReader.bytesLeft >= 4
+            else { throw LZMA2Error.wrongSizes }
         let unpackSize = (uncompressedSizeBits.toInt() << 16) +
             self.byteReader.byte().toInt() << 8 + self.byteReader.byte().toInt() + 1
         let compressedSize = self.byteReader.byte().toInt() << 8 + self.byteReader.byte().toInt() + 1
@@ -77,6 +88,12 @@ struct LZMA2Decoder {
             throw LZMA2Error.wrongReset
         }
         self.decoder.uncompressedSize = unpackSize
+        // The declared compressed data must be present in full. normalize()
+        // pads with 0 past end as a backstop, but bounding the chunk here turns
+        // a truncated file into a precise LZMA2Error rather than relying on the
+        // downstream consumption check.
+        guard self.byteReader.bytesLeft >= compressedSize
+            else { throw LZMA2Error.wrongSizes }
         let outStartIndex = self.decoder.out.count
         let inStartIndex = self.byteReader.offset
         try self.decoder.decode()
@@ -85,8 +102,13 @@ struct LZMA2Decoder {
             else { throw LZMA2Error.wrongSizes }
     }
 
-    private mutating func decodeUncompressed() {
+    private mutating func decodeUncompressed() throws {
+        // 2-byte size then that many literal bytes; both must be present.
+        guard self.byteReader.bytesLeft >= 2
+            else { throw LZMA2Error.wrongSizes }
         let dataSize = self.byteReader.byte().toInt() << 8 + self.byteReader.byte().toInt() + 1
+        guard self.byteReader.bytesLeft >= dataSize
+            else { throw LZMA2Error.wrongSizes }
         for _ in 0..<dataSize {
             self.decoder.put(self.byteReader.byte())
         }
@@ -97,6 +119,8 @@ struct LZMA2Decoder {
      scheme and resets decoder's state and sub-decoders.
      */
     private mutating func updateProperties() throws {
+        guard byteReader.bytesLeft >= 1
+            else { throw LZMA2Error.wrongSizes }
         self.decoder.properties = try LZMAProperties(lzmaByte: byteReader.byte(),
                                                      self.decoder.properties.dictionarySize)
         self.decoder.resetStateAndDecoders()

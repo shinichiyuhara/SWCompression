@@ -19,6 +19,17 @@ struct XZBlock {
         let blockHeaderStartIndex = byteReader.offset - 1
         let realBlockHeaderSize = (blockHeaderSize.toInt() + 1) * 4
 
+        // The whole block header is realBlockHeaderSize bytes measured from
+        // blockHeaderStartIndex; the caller already consumed the 1-byte size
+        // field, so realBlockHeaderSize - 1 must still be available. Every read
+        // below to the end of the header — blockFlags, the multiByteDecode
+        // sizes/filter IDs, the zero-padding loop, and the bytes(count:) the
+        // CRC re-reads — stays inside that region, so this single check keeps
+        // them all in bounds. Without it a truncated file makes those reads
+        // index past the end, which is an uncatchable Swift trap.
+        guard byteReader.bytesLeft >= realBlockHeaderSize - 1
+            else { throw XZError.wrongField }
+
         let blockFlags = byteReader.byte()
         /**
          Bit values 00, 01, 10, 11 indicate filters number from 1 to 4,

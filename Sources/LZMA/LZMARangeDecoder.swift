@@ -38,7 +38,16 @@ struct LZMARangeDecoder {
     mutating func normalize() {
         if self.range < LZMAConstants.topValue {
             self.range <<= 8
-            self.code = (self.code << 8) | UInt32(byteReader.byte())
+            // Feed 0 past end of input instead of trapping. A valid stream is
+            // consumed exactly — the callers assert byte-exact consumption
+            // (LZMA2Decoder) or a clean end (isFinishedOK) — so `isFinished` is
+            // never true here for well-formed data and behaviour is unchanged.
+            // For a truncated or corrupt stream the range decoder would
+            // otherwise read past the buffer, an uncatchable `Data`-index trap;
+            // padding with 0 (the standard LZMA end-of-input convention) lets it
+            // finish and fail the downstream size/CRC checks as a thrown error.
+            let next = byteReader.isFinished ? 0 : byteReader.byte()
+            self.code = (self.code << 8) | UInt32(next)
         }
     }
 
