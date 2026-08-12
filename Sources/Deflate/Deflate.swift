@@ -210,6 +210,18 @@ public class Deflate: DecompressionAlgorithm {
 
                         let distance = Constants.distanceBase[distanceCode] + bitReader.int(fromBits: extraDistance)
 
+                        // A back-reference may only point inside the data
+                        // decoded so far (RFC 1951 §3.2.5). A corrupt stream can
+                        // encode a distance larger than the current output, or
+                        // zero; either makes the copy below index out of range —
+                        // `count - distance` goes negative in `out[i]`, and
+                        // `length / distance` divides by zero. Both are Swift
+                        // traps, which no `try?` can catch and which crash the
+                        // host process. Reject the stream instead so the error
+                        // stays throwable.
+                        guard distance > 0, distance <= out.count
+                            else { throw DeflateError.wrongSymbol }
+
                         // We should repeat last 'distance' amount of data.
                         // The amount of times we do this is round(length / distance).
                         // length actually indicates the amount of data we get from this nextSymbol.
