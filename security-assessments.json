@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "既知脆弱性の判断の台帳（Conventions/vulnerability-watch-conventions.jp.md §3）。",
+    "check-all-vulnerabilities.py が読み、id・component・version が一致する該当を「判断済み」として週報だけに回す。",
+    "gaps は判定不能を理由つきで受け入れたもの（§3.1）。受け入れは「該当なし」ではなく、週報に理由と一緒に毎回載る。",
+    "版が変われば判断は失効する（判断はその版のコードについてのもの）。理由の無い除外は書かない。"
+  ],
+  "assessments": [],
+  "gaps": [
+    {
+      "item": "SWCompression",
+      "category": "vendored",
+      "reason": "上流 tsolomko/SWCompression の fork。NVD にも OSV（SwiftURL、64 件）にも advisory が無い（2026-10-24 確認）。上流の 54 commit を全件読み、セキュリティ修正は無かった（2026-07-31、vendored.json の記録）。上流は routine の vendored（check-all-vendored.py --watch）が週次で見る。 仕分け: Conventions/docs/cve-triage-20261024.jp.md §8.1。",
+      "assessed": "2026-10-24"
+    }
+  ]
+}
