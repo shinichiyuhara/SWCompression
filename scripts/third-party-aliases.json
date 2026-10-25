@@ -1,0 +1,5 @@
+{
+  "$comment": "Read by Conventions/tools/check-all-third-party.py --attribution (third-party-conventions §3). exempt = needs no notice in this repository. This is a Swift package (a library fork), not an app: no binary is distributed from here. SwiftPM fetches BitByteData (MIT, the library's dependency) itself in each consumer, and the apps that link it carry its notice in About > Licenses (Demion, Arkheion, Skopeion, Pinakeion; see vendored.json consumers). SwiftCLI (MIT) is used only by the swcomp test tool (Package.swift), which is not built for distribution.",
+  "aliases": {},
+  "exempt": ["bitbytedata", "swiftcli"]
+}
