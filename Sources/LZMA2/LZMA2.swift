@@ -29,8 +29,12 @@ public class LZMA2: DecompressionAlgorithm {
         return try decompress(byteReader, byteReader.byte())
     }
 
-    static func decompress(_ byteReader: LittleEndianByteReader, _ dictSizeByte: UInt8) throws -> Data {
+    /// `limit`: throw `OutputLimitExceeded` before decoding a chunk whose
+    /// header would take the output past this many bytes. LOCAL PATCH (fork).
+    static func decompress(_ byteReader: LittleEndianByteReader, _ dictSizeByte: UInt8,
+                           limit: Int = .max) throws -> Data {
         var decoder = try LZMA2Decoder(byteReader, dictSizeByte)
+        decoder.limit = limit
         try decoder.decode()
         return Data(decoder.out)
     }

@@ -277,6 +277,27 @@ The sink optionally carries an `onFallback` callback so a host can log when the
 system path declines a stream. Without one, that notice goes to stderr, which in
 a GUI application no one reads.
 
+### 4. Decoder hardening (security)
+
+Later tags harden decoders against hostile input, turning Swift traps and
+unbounded output into thrown errors. `4.9.1-sy.9` (from Arkheion's security
+audit of 2026-10-30):
+
+- **BZip2**: the block's pre-BWT buffer is held to the size from the stream
+  header. A RUNA/RUNB run previously had no ceiling, so a few dozen run symbols
+  asked for terabytes of one byte, or overflowed into a negative count that
+  trapped.
+- **7-Zip**: each coder is held to its declared unpack size *while* decoding
+  (`Deflate`, `BZip2` and the pure-Swift `LZMA2` path take an internal `limit`;
+  the `Compression` fast path stops as soon as it passes the expected size).
+  Exceeding it is `SevenZipError.wrongSize`, as before, but reported before the
+  excess has been produced. New public
+  `SevenZipContainer.folderUnpackSizes(container:)` returns those sizes, so a
+  host can check what `open(container:)` will materialise before calling it.
+  LZ4 coders are not limited yet.
+- **7-Zip**: `szMbd()` refuses values that do not fit a non-negative `Int`
+  (the 9-byte form could come out negative and trap later).
+
 ### Verification
 
 The 86 upstream files carried over were checked byte-for-byte against 4.9.1.

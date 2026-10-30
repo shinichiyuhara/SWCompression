@@ -147,9 +147,9 @@ class SevenZipFolder {
             case .copy:
                 continue
             case .deflate:
-                decodedData = try Deflate.decompress(data: decodedData)
+                decodedData = try Self.limited { try Deflate.decompress(LsbBitReader(data: decodedData), limit: unpackSize) }
             case .bzip2:
-                decodedData = try BZip2.decompress(data: decodedData)
+                decodedData = try Self.limited { try BZip2.decompress(MsbBitReader(data: decodedData), limit: unpackSize) }
             case .lzma2:
                 // Dictionary size is stored in coder's properties.
                 guard let properties = coder.properties,
@@ -168,10 +168,14 @@ class SevenZipFolder {
                     decodedData = fast
                 } else {
                     DecodeProgress.noteFallback("LZMA2")
-                    decodedData = try LZMA2.decompress(LittleEndianByteReader(data: decodedData), properties[0])
+                    decodedData = try Self.limited {
+                        try LZMA2.decompress(LittleEndianByteReader(data: decodedData), properties[0], limit: unpackSize)
+                    }
                 }
                 #else
-                decodedData = try LZMA2.decompress(LittleEndianByteReader(data: decodedData), properties[0])
+                decodedData = try Self.limited {
+                    try LZMA2.decompress(LittleEndianByteReader(data: decodedData), properties[0], limit: unpackSize)
+                }
                 #endif
             case .lzma:
                 // Both properties' byte (lp, lc, pb) and dictionary size are stored in coder's properties.
@@ -237,6 +241,18 @@ class SevenZipFolder {
                 else { throw SevenZipError.wrongSize }
         }
         return decodedData
+    }
+
+    /// LOCAL PATCH (fork): run a decoder held to the coder's declared unpack
+    /// size. Going over means the header lied about the size, which is what
+    /// the `wrongSize` check after each coder reports — only now it is
+    /// reported before the excess has been decoded rather than after.
+    private static func limited(_ decode: () throws -> Data) throws -> Data {
+        do {
+            return try decode()
+        } catch is OutputLimitExceeded {
+            throw SevenZipError.wrongSize
+        }
     }
 
 }

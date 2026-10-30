@@ -191,6 +191,12 @@ enum LZMAFraming {
                     &stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
                 let produced = bufferSize - stream.dst_size
                 if produced > 0 {
+                    // LOCAL PATCH (fork): stop as soon as the decoder passes
+                    // the size the caller expects, rather than letting the
+                    // stream run on and comparing at the end.
+                    guard produced <= expecting - out.count else {
+                        throw Failure.sizeMismatch(got: out.count + produced, expected: expecting)
+                    }
                     out.append(buffer, count: produced)
                     // Report from here, not only from LZMA2Decoder's chunk loop.
                     // This path decodes a whole folder inside one framework call

@@ -27,7 +27,10 @@ public class Deflate: DecompressionAlgorithm {
         return try decompress(bitReader)
     }
 
-    static func decompress(_ bitReader: LsbBitReader) throws -> Data {
+    /// `limit`: throw `OutputLimitExceeded` once the output passes this many
+    /// bytes (checked per block and per match, so it overshoots by at most one
+    /// stored block, 64 KiB). LOCAL PATCH (fork).
+    static func decompress(_ bitReader: LsbBitReader, limit: Int = .max) throws -> Data {
         /// An array for storing output data
         var out: [UInt8] = []
 
@@ -63,6 +66,7 @@ public class Deflate: DecompressionAlgorithm {
                 for _ in 0..<length {
                     out.append(bitReader.byte())
                 }
+                guard out.count <= limit else { throw OutputLimitExceeded() }
             } else if blockType == 1 || blockType == 2 {
                 // Block with Huffman coding (either static or dynamic)
 
@@ -245,6 +249,7 @@ public class Deflate: DecompressionAlgorithm {
                     } else {
                         throw DeflateError.wrongSymbol
                     }
+                    guard out.count <= limit else { throw OutputLimitExceeded() }
                 }
 
             } else {

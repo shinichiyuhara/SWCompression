@@ -212,6 +212,24 @@ public class SevenZipContainer: Container {
         return entries
     }
 
+    /**
+     LOCAL PATCH (fork). Returns the declared unpacked size of every folder in the container, in header order.
+
+     `open(container:)` decodes each folder in full before splitting it into entries, so what it materialises is the
+     sum of these sizes — not the sum of the entries' sizes, which a container can make arbitrarily smaller (a folder
+     whose substreams cover only part of its output, or entries that are not regular files). Each coder is held to
+     its declared size while decoding, so these values are a real ceiling, and a host can check them against its
+     budget before calling `open(container:)`.
+
+     - Throws: `SevenZipError` if the header cannot be read.
+     */
+    public static func folderUnpackSizes(container data: Data) throws -> [Int] {
+        guard let header = try readHeader(data),
+              let folders = header.mainStreams?.coderInfo.folders
+            else { return [] }
+        return folders.map { $0.unpackSize() }
+    }
+
     private static func readHeader(_ data: Data) throws -> SevenZipHeader? {
         // Valid 7-Zip container must contain at least a SignatureHeader, which is 32 bytes long.
         guard data.count >= 32

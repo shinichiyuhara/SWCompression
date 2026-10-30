@@ -10,6 +10,10 @@ struct LZMA2Decoder {
     private let byteReader: LittleEndianByteReader
     private var decoder: LZMADecoder
 
+    /// LOCAL PATCH (fork): output ceiling, checked against each chunk header
+    /// before the chunk is decoded (see `LZMA2.decompress(_:_:limit:)`).
+    var limit = Int.max
+
     var out: [UInt8] {
         return self.decoder.out
     }
@@ -87,6 +91,8 @@ struct LZMA2Decoder {
         default:
             throw LZMA2Error.wrongReset
         }
+        guard unpackSize <= self.limit - self.decoder.out.count
+            else { throw OutputLimitExceeded() }
         self.decoder.uncompressedSize = unpackSize
         // The declared compressed data must be present in full. normalize()
         // pads with 0 past end as a backstop, but bounding the chunk here turns
@@ -109,6 +115,8 @@ struct LZMA2Decoder {
         let dataSize = self.byteReader.byte().toInt() << 8 + self.byteReader.byte().toInt() + 1
         guard self.byteReader.bytesLeft >= dataSize
             else { throw LZMA2Error.wrongSizes }
+        guard dataSize <= self.limit - self.decoder.out.count
+            else { throw OutputLimitExceeded() }
         for _ in 0..<dataSize {
             self.decoder.put(self.byteReader.byte())
         }

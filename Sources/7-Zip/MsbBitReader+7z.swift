@@ -30,6 +30,12 @@ extension MsbBitReader {
             value |= self.byte().toInt() << (8 * i)
             mask >>= 1
         }
+        // LOCAL PATCH (fork): the 9-byte form puts its last byte at bit 56, so
+        // a top bit of 1 comes out as a negative Int. Every caller uses the
+        // value as a size, count or index, and a negative one traps later
+        // (`UInt64(_:)`, ranges) where it can no longer be thrown. No real 7z
+        // field needs 2^63 or more.
+        guard value >= 0 else { throw SevenZipError.internalStructureError }
         return value
     }
 

@@ -47,7 +47,9 @@ public class BZip2: DecompressionAlgorithm {
         return result
     }
 
-    static func decompress(_ bitReader: MsbBitReader) throws -> Data {
+    /// `limit`: throw `OutputLimitExceeded` before appending a block that would
+    /// take the output past this many bytes. LOCAL PATCH (fork).
+    static func decompress(_ bitReader: MsbBitReader, limit: Int = .max) throws -> Data {
         // Valid BZip2 "archive" must contain at least 14 bytes of data: magic number (2 bytes), method (1 byte), and
         // block size (1 byte).
         guard bitReader.bitsLeft >= 32
@@ -77,6 +79,7 @@ public class BZip2: DecompressionAlgorithm {
 
             if blockType == 0x314159265359 {
                 let block = try decode(bitReader, blockSize)
+                guard block.count <= limit - out.count else { throw OutputLimitExceeded() }
                 out.append(Data(block))
                 guard CheckSums.bzip2crc32(block) == blockCRC32
                     else { throw BZip2Error.wrongCRC(out) }
@@ -202,6 +205,15 @@ public class BZip2: DecompressionAlgorithm {
             tables.append(table)
         }
 
+        // LOCAL PATCH (fork): what enters the BWT is at most the block size
+        // from the stream header (100 kB per unit). The RUNA/RUNB run below had
+        // no ceiling: each run symbol doubles `repeatPower`, so a few dozen of
+        // them asked for terabytes of one byte — or, once the shift overflowed,
+        // a negative count that traps `0..<runLength`. Holding the buffer to
+        // the block size also makes it a real input to the bounds a host
+        // computes from the block count (security audit 2026-10-30, A13).
+        let maxBlockBytes = blockSize.sizeInKilobytes * 1000
+
         var decoded = 0
         var table = tables[selectors[selectors.startIndex]]
         var selectorIndex = selectors.startIndex &+ 1
@@ -226,6 +238,8 @@ public class BZip2: DecompressionAlgorithm {
             if symbol == 0 || symbol == 1 { // RUNA and RUNB symbols.
                 runLength &+= repeatPower << symbol
                 repeatPower <<= 1
+                guard runLength <= maxBlockBytes - buffer.count
+                    else { throw BZip2Error.corruptedData }
                 continue
             }
             if runLength > 0 {
@@ -252,6 +266,8 @@ public class BZip2: DecompressionAlgorithm {
                 else { throw BZip2Error.symbolNotFound }
             let element = usedSymbols.remove(at: symbol - 1)
             usedSymbols.insert(element, at: 0)
+            guard buffer.count < maxBlockBytes
+                else { throw BZip2Error.corruptedData }
             buffer.append(element)
         }
 
