@@ -73,7 +73,7 @@ BCJ で、利用側 (`Package.resolved`) もその版を `exact` で固定して
 
 `Package.resolved` に載るので SPM の台帳が正。2026-07-31 時点:
 **Pinakeion**（`4.9.1-sy.2`）/ **Skopeion**（`4.9.1-sy.2`）。
-2026-10-30: **Arkheion** は `4.9.1-sy.9`（bzip2 の連長・7z の coder 出力上限・`szMbd` の負値。
+2026-10-30: **Arkheion** は `4.9.1-sy.10`（sy.10 = LZ4 の出力上限）。sy.9 は（bzip2 の連長・7z の coder 出力上限・`szMbd` の負値。
 README "Decoder hardening"）。Pinakeion / Skopeion / Demion は sy.9 未適用 —— 同じ穴が残る。
 
 **CVE が上流に出たときの追随先は上流ではなくこの fork。** 利用側の README は

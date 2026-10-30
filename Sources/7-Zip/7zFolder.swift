@@ -216,7 +216,9 @@ class SevenZipFolder {
 
                     decodedData = DeltaFilter.decode(LittleEndianByteReader(data: decodedData), (properties[0] &+ 1).toInt())
                 } else if coder.id == [0x04, 0xF7, 0x11, 0x04] {
-                    decodedData = try LZ4.decompress(data: decodedData)
+                    decodedData = try Self.limited {
+                        try LZ4.decompress(data: decodedData, dictionary: nil, dictionaryID: nil, limit: unpackSize)
+                    }
                 } else if let branchDecode = BranchFilter.decoder(for: coder.id) {
                     // LOCAL PATCH (fork): branch converters ("BCJ"). 7-Zip
                     // applies these to executables by default, so without them

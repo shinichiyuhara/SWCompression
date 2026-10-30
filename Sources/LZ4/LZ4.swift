@@ -71,6 +71,16 @@ public enum LZ4: DecompressionAlgorithm {
      current platform.
      */
     public static func decompress(data: Data, dictionary: Data?, dictionaryID: UInt32? = nil) throws -> Data {
+        try decompress(data: data, dictionary: dictionary, dictionaryID: dictionaryID, limit: .max)
+    }
+
+    /// LOCAL PATCH (fork): `limit` throws `OutputLimitExceeded` before the
+    /// output passes that many bytes (checked per literal run and per match),
+    /// for callers that know the size — 7-Zip's coder unpack size. Each block
+    /// is also held to the frame's maximum block size, which the LZ4 frame
+    /// format says bounds a block's *decompressed* size; without it one 4 MiB
+    /// block of 255-byte length extensions could ask for about a gigabyte.
+    static func decompress(data: Data, dictionary: Data?, dictionaryID: UInt32?, limit: Int) throws -> Data {
         // Valid LZ4 frame must contain at least a magic number (4 bytes).
         guard data.count >= 4
             else { throw DataError.truncated }
@@ -79,12 +89,13 @@ public enum LZ4: DecompressionAlgorithm {
         let magic = data[data.startIndex..<data.startIndex + 4].withUnsafeBytes { $0.bindMemory(to: UInt32.self)[0] }
         switch magic {
         case 0x184D2204:
-            return try LZ4.process(frame: data[(data.startIndex + 4)...], dictionary, dictionaryID).0
+            return try LZ4.process(frame: data[(data.startIndex + 4)...], dictionary, dictionaryID, limit: limit).0
         case 0x184D2A50...0x184D2A5F:
             let frameSize = try process(skippableFrame: data[(data.startIndex + 4)...])
-            return try LZ4.decompress(data: data[(data.startIndex + 4 + frameSize)...])
+            return try LZ4.decompress(data: data[(data.startIndex + 4 + frameSize)...], dictionary: dictionary,
+                                      dictionaryID: dictionaryID, limit: limit)
         case 0x184C2102:
-            return try LZ4.process(legacyFrame: data[(data.startIndex + 4)...]).0
+            return try LZ4.process(legacyFrame: data[(data.startIndex + 4)...], limit: limit).0
         default:
             throw DataError.corrupted
         }
@@ -157,7 +168,7 @@ public enum LZ4: DecompressionAlgorithm {
     // The functions below return uncompressed data and the offset to the next byte after the processed frame (even if
     // the end of the input data was reached). The offset is required to make multiDecompress function work.
 
-    private static func process(legacyFrame data: Data) throws -> (Data, Data.Index) {
+    private static func process(legacyFrame data: Data, limit: Int = .max) throws -> (Data, Data.Index) {
         let reader = LittleEndianByteReader(data: data)
         var out = Data()
         // The end of a frame is determined by either end-of-file or by encountering a valid frame magic number.
@@ -180,12 +191,15 @@ public enum LZ4: DecompressionAlgorithm {
             let blockData = data[reader.offset..<reader.offset + blockSize]
             reader.offset += blockSize
 
-            out.append(Data(try LZ4.process(block: blockData)))
+            // Legacy frames use 8 MiB blocks.
+            out.append(Data(try LZ4.process(block: blockData, maxOutput: 8 * 1024 * 1024,
+                                            limit: limit - out.count)))
         }
         return (out, reader.offset)
     }
 
-    private static func process(frame data: Data, _ dictionary: Data?, _ extDictId: UInt32?) throws -> (Data, Data.Index) {
+    private static func process(frame data: Data, _ dictionary: Data?, _ extDictId: UInt32?,
+                                limit: Int = .max) throws -> (Data, Data.Index) {
         // Valid LZ4 frame must contain a frame descriptor (at least 3 bytes) and the EndMark (4 bytes), assuming no
         // data blocks.
         guard data.count >= 7
@@ -302,17 +316,21 @@ public enum LZ4: DecompressionAlgorithm {
 
             if compressed {
                 if independentBlocks {
-                    out.append(Data(try LZ4.process(block: blockData, dictionary)))
+                    out.append(Data(try LZ4.process(block: blockData, dictionary,
+                                                    maxOutput: maxBlockSize, limit: limit - out.count)))
                 } else {
                     if out.isEmpty, let dictionary = dictionary {
                         out.append(Data(try LZ4.process(block: blockData,
-                                                   dictionary[max(dictionary.endIndex - 64 * 1024, dictionary.startIndex)...])))
+                                                   dictionary[max(dictionary.endIndex - 64 * 1024, dictionary.startIndex)...],
+                                                   maxOutput: maxBlockSize, limit: limit - out.count)))
                     } else {
                         out.append(Data(try LZ4.process(block: blockData,
-                                                   out[max(out.endIndex - 64 * 1024, out.startIndex)...])))
+                                                   out[max(out.endIndex - 64 * 1024, out.startIndex)...],
+                                                   maxOutput: maxBlockSize, limit: limit - out.count)))
                     }
                 }
             } else {
+                guard blockData.count <= limit - out.count else { throw OutputLimitExceeded() }
                 out.append(blockData)
             }
         }
@@ -329,7 +347,11 @@ public enum LZ4: DecompressionAlgorithm {
         return (out, reader.offset)
     }
 
-    private static func process(block data: Data, _ dict: Data? = nil) throws -> [UInt8] {
+    /// `maxOutput`: the frame's block size, a property of the format (over it
+    /// is corruption). `limit`: the caller's remaining allowance (over it is
+    /// `OutputLimitExceeded`). LOCAL PATCH (fork).
+    private static func process(block data: Data, _ dict: Data? = nil,
+                                maxOutput: Int = .max, limit: Int = .max) throws -> [UInt8] {
         let reader = LittleEndianByteReader(data: data)
         var out = dict?.withUnsafeBytes { $0.map { $0 } } ?? [UInt8]()
         let outStartIndex = out.endIndex
@@ -363,6 +385,7 @@ public enum LZ4: DecompressionAlgorithm {
             }
             guard data.endIndex - reader.offset >= literalCount
                 else { throw DataError.truncated }
+            try checkRoom(literalCount, produced: out.endIndex - outStartIndex, maxOutput, limit)
             out.append(contentsOf: reader.bytes(count: literalCount))
 
             // The last sequence contains only literals.
@@ -403,6 +426,7 @@ public enum LZ4: DecompressionAlgorithm {
             // We record the start index of the last encountered match to verify it against end-of-block restrictions.
             // This refers to the bytes that we have found a match for, and not to the bytes that we're matching to.
             lastMatchStartIndex = out.endIndex
+            try checkRoom(matchLength, produced: out.endIndex - outStartIndex, maxOutput, limit)
             let matchStartIndex = out.endIndex - offset
             for i in 0..<matchLength {
                 out.append(out[matchStartIndex + i])
@@ -410,6 +434,11 @@ public enum LZ4: DecompressionAlgorithm {
         }
 
         return Array(out[outStartIndex...])
+    }
+
+    private static func checkRoom(_ count: Int, produced: Int, _ maxOutput: Int, _ limit: Int) throws {
+        guard count <= maxOutput - produced else { throw DataError.corrupted }
+        guard count <= limit - produced else { throw OutputLimitExceeded() }
     }
 
 }

@@ -294,7 +294,11 @@ audit of 2026-10-30):
   excess has been produced. New public
   `SevenZipContainer.folderUnpackSizes(container:)` returns those sizes, so a
   host can check what `open(container:)` will materialise before calling it.
-  LZ4 coders are not limited yet.
+  `4.9.1-sy.10` adds the same limit to LZ4 (internal
+  `LZ4.decompress(data:dictionary:dictionaryID:limit:)`), and holds every LZ4
+  block to its frame's maximum block size, which the frame format says bounds
+  the *decompressed* block (a 4 MiB block of length extensions could otherwise
+  ask for about a gigabyte).
 - **7-Zip**: `szMbd()` refuses values that do not fit a non-negative `Int`
   (the 9-byte form could come out negative and trap later).
 
