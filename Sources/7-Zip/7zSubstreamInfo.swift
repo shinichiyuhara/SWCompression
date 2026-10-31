@@ -14,16 +14,18 @@ class SevenZipSubstreamInfo {
     init(_ bitReader: MsbBitReader, _ coderInfo: SevenZipCoderInfo) throws {
         var totalUnpackStreams = coderInfo.folders.count
 
-        var type = bitReader.byte()
+        var type = try bitReader.szByte()
 
         if type == 0x0D {
             totalUnpackStreams = 0
             for folder in coderInfo.folders {
                 let numStreams = try bitReader.szMbd()
                 folder.numUnpackSubstreams = numStreams
-                totalUnpackStreams += numStreams
+                let (total, overflow) = totalUnpackStreams.addingReportingOverflow(numStreams)
+                guard !overflow else { throw SevenZipError.internalStructureError }
+                totalUnpackStreams = total
             }
-            type = bitReader.byte()
+            type = try bitReader.szByte()
         }
 
         for folder in coderInfo.folders {
@@ -35,19 +37,28 @@ class SevenZipSubstreamInfo {
                 for _ in 0..<folder.numUnpackSubstreams - 1 {
                     let size = try bitReader.szMbd()
                     unpackSizes.append(size)
-                    sum += size
+                    let (newSum, overflow) = sum.addingReportingOverflow(size)
+                    guard !overflow else { throw SevenZipError.internalStructureError }
+                    sum = newSum
                 }
             }
+            // The last substream's size is what remains; substreams that
+            // already claim more than the folder holds leave a negative size,
+            // which traps once it is used to slice the output.
+            guard sum <= folder.unpackSize()
+                else { throw SevenZipError.internalStructureError }
             unpackSizes.append(folder.unpackSize() - sum)
         }
         if type == 0x09 {
-            type = bitReader.byte()
+            type = try bitReader.szByte()
         }
 
         var totalDigests = 0
         for folder in coderInfo.folders {
             if folder.numUnpackSubstreams != 1 || folder.crc == nil {
-                totalDigests += folder.numUnpackSubstreams
+                let (total, overflow) = totalDigests.addingReportingOverflow(folder.numUnpackSubstreams)
+                guard !overflow else { throw SevenZipError.internalStructureError }
+                totalDigests = total
             }
         }
 
@@ -58,7 +69,7 @@ class SevenZipSubstreamInfo {
             var missingCrcs = [UInt32?]()
             for i in 0..<totalDigests {
                 if definedBits[i] == 1 {
-                    missingCrcs.append(bitReader.uint32())
+                    missingCrcs.append(try bitReader.szUint32())
                 } else {
                     missingCrcs.append(nil)
                 }
@@ -76,7 +87,7 @@ class SevenZipSubstreamInfo {
                 }
             }
 
-            type = bitReader.byte()
+            type = try bitReader.szByte()
         }
 
         guard type == 0x00

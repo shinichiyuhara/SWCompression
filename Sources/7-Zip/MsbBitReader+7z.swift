@@ -47,13 +47,50 @@ extension MsbBitReader {
         if allDefined == 0 {
             // `bits(count:)` reads ceil(count/8) bytes; a corrupt `count` from
             // the header must not read past the buffer.
-            guard (count + 7) / 8 <= self.bytesLeft
-                else { throw SevenZipError.internalStructureError }
-            definedBits = self.bits(count: count)
+            definedBits = try self.szBits(count: count)
         } else {
+            // LOCAL PATCH (fork): every caller reads at least 4 bytes per
+            // defined item, so a count beyond the remaining bytes is a lie, and
+            // honouring it would allocate `count` bytes from a few header bytes.
+            guard count <= self.bytesLeft
+                else { throw SevenZipError.internalStructureError }
             definedBits = Array(repeating: 1, count: count)
         }
         return definedBits
+    }
+
+    // LOCAL PATCH (fork): checked forms of BitByteData's reads. Those index the
+    // buffer directly, so running off the end is an uncatchable trap. The header
+    // parsers read fields whose positions are decided by earlier header fields,
+    // so all of them go through these.
+
+    func szByte() throws -> UInt8 {
+        guard !self.isFinished else { throw SevenZipError.internalStructureError }
+        return self.byte()
+    }
+
+    func szUint32() throws -> UInt32 {
+        guard self.bytesLeft >= 4 else { throw SevenZipError.internalStructureError }
+        return self.uint32()
+    }
+
+    func szUint64() throws -> UInt64 {
+        guard self.bytesLeft >= 8 else { throw SevenZipError.internalStructureError }
+        return self.uint64()
+    }
+
+    func szBytes(count: Int) throws -> [UInt8] {
+        guard count >= 0, count <= self.bytesLeft
+            else { throw SevenZipError.internalStructureError }
+        return self.bytes(count: count)
+    }
+
+    /// `count` is compared in bits rather than rounded up to bytes, which would
+    /// overflow on a count near `Int.max`.
+    func szBits(count: Int) throws -> [UInt8] {
+        guard count >= 0, count <= self.bytesLeft * 8
+            else { throw SevenZipError.internalStructureError }
+        return self.bits(count: count)
     }
 
 }

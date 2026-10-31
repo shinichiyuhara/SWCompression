@@ -12,23 +12,23 @@ class SevenZipStreamInfo {
     var substreamInfo: SevenZipSubstreamInfo?
 
     init(_ bitReader: MsbBitReader) throws {
-        var type = bitReader.byte()
+        var type = try bitReader.szByte()
 
         if type == 0x06 {
             packInfo = try SevenZipPackInfo(bitReader)
-            type = bitReader.byte()
+            type = try bitReader.szByte()
         }
 
         if type == 0x07 {
             coderInfo = try SevenZipCoderInfo(bitReader)
-            type = bitReader.byte()
+            type = try bitReader.szByte()
         } else {
             coderInfo = SevenZipCoderInfo()
         }
 
         if type == 0x08 {
             substreamInfo = try SevenZipSubstreamInfo(bitReader, coderInfo)
-            type = bitReader.byte()
+            type = try bitReader.szByte()
         }
 
         guard type == 0x00

@@ -20,6 +20,8 @@ class SevenZipFolder {
 
     }
 
+    private static let maxCoders = 64
+
     let numCoders: Int
     private(set) var coders = [SevenZipCoder]()
 
@@ -40,13 +42,20 @@ class SevenZipFolder {
     var numUnpackSubstreams = 1
 
     lazy var orderedCompressionMethods: [CompressionMethod] = {
-        self.orderedCoders().map { $0.compressionMethod }
+        ((try? self.orderedCoders()) ?? []).map { $0.compressionMethod }
     }()
 
     init(_ bitReader: MsbBitReader) throws {
         numCoders = try bitReader.szMbd()
+        // LOCAL PATCH (fork): 7-Zip's own reader refuses more than 64 coders or
+        // 64 streams per coder (k_Scan_NumCoders_MAX). Without the limit the
+        // stream totals overflow, and the bind-pair searches below go quadratic.
+        guard numCoders <= Self.maxCoders
+            else { throw SevenZipError.internalStructureError }
         for _ in 0..<numCoders {
             let coder = try SevenZipCoder(bitReader)
+            guard coder.numInStreams <= Self.maxCoders, coder.numOutStreams <= Self.maxCoders
+                else { throw SevenZipError.internalStructureError }
             coders.append(coder)
             totalOutputStreams += coder.numOutStreams
             totalInputStreams += coder.numInStreams
@@ -85,10 +94,17 @@ class SevenZipFolder {
         }
     }
 
-    func orderedCoders() -> [SevenZipCoder] {
+    /// LOCAL PATCH (fork): throws on a bind pair naming a coder that does not
+    /// exist (a trap), and on a cycle of bind pairs (which grew `result` until
+    /// memory ran out). Checked here rather than at parse time because stream
+    /// indices of multi-stream coders legitimately exceed the coder count, and
+    /// listing such an archive must keep working; only unpacking it fails.
+    func orderedCoders() throws -> [SevenZipCoder] {
         var result = [SevenZipCoder]()
         var current = 0
         while current != -1 {
+            guard current >= 0, current < coders.count, result.count < coders.count
+                else { throw SevenZipError.internalStructureError }
             result.append(coders[current])
             let pair = bindPairForOutStream(current)
             current = pair != -1 ? bindPairs[pair].inIndex : -1
@@ -127,7 +143,7 @@ class SevenZipFolder {
     }
 
     func unpackSize(for coder: SevenZipCoder) -> Int {
-        for i in 0..<coders.count {
+        for i in 0..<min(coders.count, unpackSizes.count) {
             if coders[i] == coder {
                 return unpackSizes[i]
             }
@@ -137,7 +153,7 @@ class SevenZipFolder {
 
     func unpack(data: Data) throws -> Data {
         var decodedData = data
-        for coder in self.orderedCoders() {
+        for coder in try self.orderedCoders() {
             guard coder.numInStreams == 1 || coder.numOutStreams == 1
                 else { throw SevenZipError.multiStreamNotSupported }
 

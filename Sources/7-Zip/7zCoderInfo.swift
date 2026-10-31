@@ -18,11 +18,11 @@ class SevenZipCoderInfo {
     }
 
     init(_ bitReader: MsbBitReader) throws {
-        var type = bitReader.byte()
+        var type = try bitReader.szByte()
         guard type == 0x0B else { throw SevenZipError.internalStructureError }
 
         numFolders = try bitReader.szMbd()
-        external = bitReader.byte()
+        external = try bitReader.szByte()
 
         guard external == 0
             else { throw SevenZipError.externalNotSupported }
@@ -31,7 +31,7 @@ class SevenZipCoderInfo {
             folders.append(try SevenZipFolder(bitReader))
         }
 
-        type = bitReader.byte()
+        type = try bitReader.szByte()
         guard type == 0x0C else { throw SevenZipError.internalStructureError }
 
         for folder in folders {
@@ -40,17 +40,17 @@ class SevenZipCoderInfo {
             }
         }
 
-        type = bitReader.byte()
+        type = try bitReader.szByte()
 
         if type == 0x0A {
             let definedBits = try bitReader.defBits(count: numFolders)
             bitReader.align()
 
             for i in 0..<numFolders where definedBits[i] == 1 {
-                folders[i].crc = bitReader.uint32()
+                folders[i].crc = try bitReader.szUint32()
             }
 
-            type = bitReader.byte()
+            type = try bitReader.szByte()
         }
 
         guard type == 0x00

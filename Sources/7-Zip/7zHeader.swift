@@ -8,17 +8,19 @@ import BitByteData
 
 class SevenZipHeader {
 
+    private static let maxEncodedHeaderSize = 128 * 1024 * 1024
+
     var archiveProperties: [SevenZipProperty]?
     var additionalStreams: SevenZipStreamInfo?
     var mainStreams: SevenZipStreamInfo?
     var fileInfo: SevenZipFileInfo?
 
     init(_ bitReader: MsbBitReader) throws {
-        var type = bitReader.byte()
+        var type = try bitReader.szByte()
 
         if type == 0x02 {
             archiveProperties = try SevenZipProperty.getProperties(bitReader)
-            type = bitReader.byte()
+            type = try bitReader.szByte()
         }
 
         if type == 0x03 {
@@ -27,12 +29,12 @@ class SevenZipHeader {
 
         if type == 0x04 {
             mainStreams = try SevenZipStreamInfo(bitReader)
-            type = bitReader.byte()
+            type = try bitReader.szByte()
         }
 
         if type == 0x05 {
             fileInfo = try SevenZipFileInfo(bitReader)
-            type = bitReader.byte()
+            type = try bitReader.szByte()
         }
 
         guard type == 0x00
@@ -49,15 +51,23 @@ class SevenZipHeader {
             else { throw SevenZipError.internalStructureError }
         let folder = streamInfo.coderInfo.folders[0]
 
-        let folderOffset = SevenZipContainer.signatureHeaderSize + packInfo.packPosition
+        // LOCAL PATCH (fork): `info(container:)` decodes this before a host can
+        // look at any entry, so no host guard can stand in front of it. The
+        // limit covers every coder's output, not only the last. 128 MiB holds a
+        // header for roughly 800,000 files.
+        guard (folder.unpackSizes.max() ?? 0) <= Self.maxEncodedHeaderSize
+            else { throw SevenZipError.internalStructureError }
+
+        let (folderOffset, overflow) = SevenZipContainer.signatureHeaderSize
+            .addingReportingOverflow(packInfo.packPosition)
         let packSize = packInfo.packSizes[0]
-        guard folderOffset >= 0, packSize >= 0,
+        guard !overflow, folderOffset >= 0, packSize >= 0,
               folderOffset <= bitReader.size,
               packSize <= bitReader.size - folderOffset
             else { throw SevenZipError.internalStructureError }
         bitReader.offset = folderOffset
 
-        let packedHeaderData = Data(bitReader.bytes(count: packSize))
+        let packedHeaderData = Data(try bitReader.szBytes(count: packSize))
         let headerData = try folder.unpack(data: packedHeaderData)
 
         guard headerData.count == folder.unpackSize()
@@ -69,7 +79,7 @@ class SevenZipHeader {
 
         let headerBitReader = MsbBitReader(data: headerData)
 
-        guard headerBitReader.byte() == 0x01
+        guard try headerBitReader.szByte() == 0x01
             else { throw SevenZipError.internalStructureError }
         try self.init(headerBitReader)
     }

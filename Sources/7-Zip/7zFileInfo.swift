@@ -26,6 +26,11 @@ class SevenZipFileInfo {
 
     init(_ bitReader: MsbBitReader) throws {
         numFiles = try bitReader.szMbd()
+        // LOCAL PATCH (fork): this loop allocates from a count alone, so 45 bytes
+        // could ask for gigabytes before any guard in a host sees the result.
+        // A file costs at least one header byte (its name, a UTF-16 terminator).
+        guard numFiles <= bitReader.bytesLeft
+            else { throw SevenZipError.internalStructureError }
         for _ in 0..<numFiles {
             files.append(File())
         }
@@ -35,35 +40,37 @@ class SevenZipFileInfo {
         var isAntiFile: [UInt8]?
 
         while true {
-            let propertyType = bitReader.byte()
+            let propertyType = try bitReader.szByte()
             if propertyType == 0 {
                 break
             }
             let propertySize = try bitReader.szMbd()
             switch propertyType {
             case 0x0E: // EmptyStream
-                isEmptyStream = bitReader.bits(count: numFiles)
+                isEmptyStream = try bitReader.szBits(count: numFiles)
                 bitReader.align()
             case 0x0F: // EmptyFile
                 guard let emptyStreamCount = isEmptyStream?.filter({ $0 == 1 }).count
                     else { throw SevenZipError.internalStructureError }
-                isEmptyFile = bitReader.bits(count: emptyStreamCount)
+                isEmptyFile = try bitReader.szBits(count: emptyStreamCount)
                 bitReader.align()
             case 0x10: // AntiFile (used in backups to indicate that file was removed)
                 guard let emptyStreamCount = isEmptyStream?.filter({ $0 == 1 }).count
                     else { throw SevenZipError.internalStructureError }
-                isAntiFile = bitReader.bits(count: emptyStreamCount)
+                isAntiFile = try bitReader.szBits(count: emptyStreamCount)
                 bitReader.align()
             case 0x11: // File name
-                let external = bitReader.byte()
+                let external = try bitReader.szByte()
                 guard external == 0
                     else { throw SevenZipError.externalNotSupported }
-                guard (propertySize - 1) & 1 == 0,
-                    let names = String(bytes: bitReader.bytes(count: propertySize - 1), encoding: .utf16LittleEndian)
+                guard propertySize >= 1, (propertySize - 1) & 1 == 0,
+                    let names = String(bytes: try bitReader.szBytes(count: propertySize - 1), encoding: .utf16LittleEndian)
                     else { throw SevenZipError.internalStructureError }
 
                 var nextFile = 0
                 for name in names.split(separator: "\u{0}") {
+                    guard nextFile < numFiles
+                        else { throw SevenZipError.internalStructureError }
                     files[nextFile].name = String(name)
                     nextFile += 1
                 }
@@ -73,45 +80,45 @@ class SevenZipFileInfo {
             case 0x12: // Creation time
                 let timesDefined = try bitReader.defBits(count: numFiles)
                 bitReader.align()
-                let external = bitReader.byte()
+                let external = try bitReader.szByte()
                 guard external == 0
                     else { throw SevenZipError.externalNotSupported }
 
                 for i in 0..<numFiles where timesDefined[i] == 1 {
-                    files[i].cTime = Date(bitReader.uint64())
+                    files[i].cTime = Date(try bitReader.szUint64())
                 }
             case 0x13: // Access time
                 let timesDefined = try bitReader.defBits(count: numFiles)
                 bitReader.align()
 
-                let external = bitReader.byte()
+                let external = try bitReader.szByte()
                 guard external == 0
                     else { throw SevenZipError.externalNotSupported }
 
                 for i in 0..<numFiles where timesDefined[i] == 1 {
-                    files[i].aTime = Date(bitReader.uint64())
+                    files[i].aTime = Date(try bitReader.szUint64())
                 }
             case 0x14: // Modification time
                 let timesDefined = try bitReader.defBits(count: numFiles)
                 bitReader.align()
 
-                let external = bitReader.byte()
+                let external = try bitReader.szByte()
                 guard external == 0
                     else { throw SevenZipError.externalNotSupported }
 
                 for i in 0..<numFiles where timesDefined[i] == 1 {
-                    files[i].mTime = Date(bitReader.uint64())
+                    files[i].mTime = Date(try bitReader.szUint64())
                 }
             case 0x15: // WinAttributes
                 let attributesDefined = try bitReader.defBits(count: numFiles)
                 bitReader.align()
 
-                let external = bitReader.byte()
+                let external = try bitReader.szByte()
                 guard external == 0
                     else { throw SevenZipError.externalNotSupported }
 
                 for i in 0..<numFiles where attributesDefined[i] == 1 {
-                    files[i].winAttributes = bitReader.uint32()
+                    files[i].winAttributes = try bitReader.szUint32()
                 }
             case 0x18: // StartPos
                 throw SevenZipError.startPosNotSupported
@@ -123,7 +130,7 @@ class SevenZipFileInfo {
                 guard bitReader.size - bitReader.offset >= propertySize
                     else { throw SevenZipError.internalStructureError }
                 unknownProperties.append(SevenZipProperty(propertyType, propertySize,
-                                                          bitReader.bytes(count: propertySize)))
+                                                          try bitReader.szBytes(count: propertySize)))
             }
         }
 
@@ -131,6 +138,11 @@ class SevenZipFileInfo {
         for i in 0..<numFiles {
             files[i].isEmptyStream = isEmptyStream?[i] == 1
             if files[i].isEmptyStream {
+                // A repeated EmptyStream property can raise the count after
+                // EmptyFile/AntiFile were sized from the earlier one.
+                guard emptyFileIndex < isEmptyFile?.count ?? .max,
+                      emptyFileIndex < isAntiFile?.count ?? .max
+                    else { throw SevenZipError.internalStructureError }
                 files[i].isEmptyFile = isEmptyFile?[emptyFileIndex] == 1
                 files[i].isAntiFile = isAntiFile?[emptyFileIndex] == 1
                 emptyFileIndex += 1

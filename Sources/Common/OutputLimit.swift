@@ -11,3 +11,10 @@
 
 /// Thrown when a decoder would produce more than its caller allowed.
 struct OutputLimitExceeded: Error {}
+
+/// LOCAL PATCH (fork): the public form of `OutputLimitExceeded`, thrown by the
+/// entry points where the host chooses the limit, such as
+/// `BZip2.decompress(data:limit:)`.
+public struct DecompressionLimitExceeded: Error {
+    public let limit: Int
+}

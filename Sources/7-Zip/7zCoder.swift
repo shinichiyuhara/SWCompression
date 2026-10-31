@@ -22,7 +22,7 @@ class SevenZipCoder {
     var properties: [UInt8]?
 
     init(_ bitReader: MsbBitReader) throws {
-        let flags = bitReader.byte()
+        let flags = try bitReader.szByte()
         guard flags & 0xC0 == 0
             else { throw SevenZipError.internalStructureError }
         idSize = (flags & 0x0F).toInt()
@@ -33,7 +33,7 @@ class SevenZipCoder {
         // read below, which traps on an empty array).
         guard idSize >= 1, idSize <= bitReader.bytesLeft
             else { throw SevenZipError.internalStructureError }
-        id = bitReader.bytes(count: idSize)
+        id = try bitReader.szBytes(count: idSize)
         compressionMethod = CompressionMethod(id)
         isEncryptionMethod = id[0] == 0x06
 
@@ -47,7 +47,7 @@ class SevenZipCoder {
             guard size >= 0, size <= bitReader.bytesLeft
                 else { throw SevenZipError.internalStructureError }
             propertiesSize = size
-            properties = bitReader.bytes(count: size)
+            properties = try bitReader.szBytes(count: size)
         }
     }
 

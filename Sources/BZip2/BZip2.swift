@@ -47,6 +47,23 @@ public class BZip2: DecompressionAlgorithm {
         return result
     }
 
+    /**
+     LOCAL PATCH (fork). Decompresses BZip2 `data`, refusing to produce more than `limit` bytes.
+
+     The ratio of this format is so high that a limit on the input means nothing: a few hundred bytes can expand to
+     hundreds of megabytes.
+
+     - Throws: `BZip2Error` as `decompress(data:)` does, or `DecompressionLimitExceeded` once the output would pass
+     `limit`.
+     */
+    public static func decompress(data: Data, limit: Int) throws -> Data {
+        do {
+            return try decompress(MsbBitReader(data: data), limit: limit)
+        } catch is OutputLimitExceeded {
+            throw DecompressionLimitExceeded(limit: limit)
+        }
+    }
+
     /// `limit`: throw `OutputLimitExceeded` before appending a block that would
     /// take the output past this many bytes. LOCAL PATCH (fork).
     static func decompress(_ bitReader: MsbBitReader, limit: Int = .max) throws -> Data {

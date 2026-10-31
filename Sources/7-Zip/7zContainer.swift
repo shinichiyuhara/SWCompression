@@ -89,24 +89,24 @@ public class SevenZipContainer: Container {
                 // enountered in the same order, as they are placed in the container. Thus, we have to start moving
                 // to stream's offset from the beginning.
                 // TODO: Is this correct or the order of streams is guaranteed?
-                byteReader.offset = signatureHeaderSize + packInfo.packPosition // Pack offset.
-                if streamIndex != 0 {
-                    for i in 0..<streamIndex {
-                        byteReader.offset += packInfo.packSizes[i]
-                    }
-                }
-
                 // The pack offset and sizes come from the header; the running
-                // offset above, the stream index, and the size below can all
-                // point outside the buffer on a corrupt file — each an
-                // uncatchable trap. Validate before reading.
+                // offset, the stream index, and the size below can all point
+                // outside the buffer on a corrupt file — and the additions can
+                // overflow — each an uncatchable trap. Validate before reading.
                 guard streamIndex < packInfo.packSizes.count
                     else { throw SevenZipError.internalStructureError }
+                var (streamOffset, overflow) = signatureHeaderSize.addingReportingOverflow(packInfo.packPosition)
+                guard !overflow else { throw SevenZipError.internalStructureError }
+                for i in 0..<streamIndex {
+                    (streamOffset, overflow) = streamOffset.addingReportingOverflow(packInfo.packSizes[i])
+                    guard !overflow else { throw SevenZipError.internalStructureError }
+                }
                 let packSize = packInfo.packSizes[streamIndex]
-                guard byteReader.offset >= 0, packSize >= 0,
-                      byteReader.offset <= byteReader.size,
-                      packSize <= byteReader.size - byteReader.offset
+                guard streamOffset >= 0, packSize >= 0,
+                      streamOffset <= byteReader.size,
+                      packSize <= byteReader.size - streamOffset
                     else { throw SevenZipError.internalStructureError }
+                byteReader.offset = streamOffset
                 // Load the stream.
                 let streamData = Data(byteReader.bytes(count: packSize))
 
@@ -219,7 +219,8 @@ public class SevenZipContainer: Container {
      sum of these sizes — not the sum of the entries' sizes, which a container can make arbitrarily smaller (a folder
      whose substreams cover only part of its output, or entries that are not regular files). Each coder is held to
      its declared size while decoding, so these values are a real ceiling, and a host can check them against its
-     budget before calling `open(container:)`.
+     budget before calling `open(container:)`. A folder's value is the largest output of any of its coders, not only
+     the last: an earlier coder in the chain can declare far more than the folder finally produces.
 
      - Throws: `SevenZipError` if the header cannot be read.
      */
@@ -227,7 +228,7 @@ public class SevenZipContainer: Container {
         guard let header = try readHeader(data),
               let folders = header.mainStreams?.coderInfo.folders
             else { return [] }
-        return folders.map { $0.unpackSize() }
+        return folders.map { $0.unpackSizes.max() ?? 0 }
     }
 
     private static func readHeader(_ data: Data) throws -> SevenZipHeader? {

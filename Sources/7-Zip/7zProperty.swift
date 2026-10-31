@@ -20,12 +20,12 @@ struct SevenZipProperty {
     static func getProperties(_ bitReader: MsbBitReader) throws -> [SevenZipProperty] {
         var properties = [SevenZipProperty]()
         while true {
-            let propertyType = bitReader.byte()
+            let propertyType = try bitReader.szByte()
             if propertyType == 0 {
                 break
             }
             let propertySize = try bitReader.szMbd()
-            properties.append(SevenZipProperty(propertyType, propertySize, bitReader.bytes(count: propertySize)))
+            properties.append(SevenZipProperty(propertyType, propertySize, try bitReader.szBytes(count: propertySize)))
         }
         return properties
     }

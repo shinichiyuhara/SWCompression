@@ -16,13 +16,13 @@ class SevenZipPackInfo {
         packPosition = try bitReader.szMbd()
         numPackStreams = try bitReader.szMbd()
 
-        var type = bitReader.byte()
+        var type = try bitReader.szByte()
 
         if type == 0x09 {
             for _ in 0..<numPackStreams {
                 packSizes.append(try bitReader.szMbd())
             }
-            type = bitReader.byte()
+            type = try bitReader.szByte()
         }
 
         if type == 0x0A {
@@ -31,13 +31,13 @@ class SevenZipPackInfo {
 
             for bit in definedBits {
                 if bit == 1 {
-                    digests.append(bitReader.uint32())
+                    digests.append(try bitReader.szUint32())
                 } else {
                     digests.append(nil)
                 }
             }
 
-            type = bitReader.byte()
+            type = try bitReader.szByte()
         }
 
         guard type == 0x00

@@ -83,6 +83,12 @@ struct TarParser {
             return .specialEntry(specialEntryType)
         } else {
             let info = TarEntryInfo(header, lastGlobalExtendedHeader, lastLocalExtendedHeader, longName, longLinkName)
+            // LOCAL PATCH (fork): a PAX record replaces `header.size`, so the
+            // check above did not cover this value. `TarContainer.open` slices
+            // the entry's data with it, and a negative or overflowing size traps.
+            if let size = info.size {
+                guard size >= 0, size <= reader.size - dataStartIndex else { return .truncated }
+            }
             // Skip file data.
             reader.offset = dataStartIndex + header.size.roundTo512()
             lastLocalExtendedHeader = nil

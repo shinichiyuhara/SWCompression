@@ -302,6 +302,22 @@ audit of 2026-10-30):
 - **7-Zip**: `szMbd()` refuses values that do not fit a non-negative `Int`
   (the 9-byte form could come out negative and trap later).
 
+
+`4.9.1-sy.11` (from Pinakeion's security audit of 2026-10-31):
+
+- **7-Zip**: every read in the header parsers is bounds-checked, along with the
+  arithmetic on header fields. The earlier guards covered only what random
+  mutation reached, and hand-built containers under 170 bytes still trapped. A
+  count no longer allocates ahead of the bytes that back it, the coder chain
+  refuses cycles and missing coders, coder and stream counts follow 7-Zip's own
+  limit of 64, and an encoded header may decode to at most 128 MiB.
+  `folderUnpackSizes(container:)` now reports the largest output of any coder in
+  the folder, since an earlier coder can declare more than the last one produces.
+- **TAR**: a PAX `size` record is held to the same range check as the header's
+  size field. A negative or overflowing one used to trap.
+- **BZip2**: new public `BZip2.decompress(data:limit:)`, which throws
+  `DecompressionLimitExceeded`.
+
 ### Verification
 
 The 86 upstream files carried over were checked byte-for-byte against 4.9.1.
