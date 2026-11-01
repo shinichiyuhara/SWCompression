@@ -16,37 +16,37 @@
       "branched_at": "4.9.1",
       "license": "MIT",
       "doc": "VENDORED.md",
-      "why": "7-Zip は入力が機械語に見えると BCJ 分岐フィルタを自動適用するが、上流はそれを 1 つも実装しておらず compressionNotSupported で落ちる。実行ファイルを含む 7z / cb7 が開けなかった。あわせて LZMA/LZMA2 を Apple の Compression に通す高速経路と、復号の進捗通知を追加している。",
+      "why": "7-Zip は入力が機械語に見えると BCJ 分岐フィルタを自動適用するが、上流はそれを 1 つも実装しておらず compressionNotSupported で落ちる。実行ファイルを含む 7z / cb7 が開けなかった。あわせて LZMA/LZMA2 を Apple の Compression に通す高速経路、復号の進捗通知、悪意ある入力に対するデコーダの堅牢化（sy.3 以降）を追加している。",
       "released_as": "4.9.1-sy.N",
       "consumers_note": "この fork を SPM の exact 依存で引いているアプリ。**新しいタグを切ったらこの一覧に配る**。ここに置くのは、配布先がタグを切る場所から引けないと、誰かの記憶（実際 4.9.1-sy.1→sy.2 の横展開は Demion の MEMORY.md にしか書かれていなかった）に依存するため。各アプリ側の検知は scripts/check-dependencies.py が担う。",
       "consumers": [
         {
           "app": "Demion",
           "repo": "~/Developer/Claude/Demion",
-          "pin": "exact 4.9.1-sy.2"
+          "pin": "exact（現在の版は各 repo の Package.swift が正）"
         },
         {
           "app": "Arkheion",
           "repo": "~/Developer/Claude/Arkheion",
-          "pin": "exact 4.9.1-sy.2"
+          "pin": "exact（現在の版は各 repo の Package.swift が正）"
         },
         {
           "app": "Skopeion",
           "repo": "~/Developer/Claude/Skopeion",
-          "pin": "exact 4.9.1-sy.2"
+          "pin": "exact（現在の版は各 repo の Package.swift が正）"
         },
         {
           "app": "Pinakeion",
           "repo": "~/Developer/Claude/Pinakeion",
-          "pin": "exact 4.9.1-sy.2"
+          "pin": "exact（現在の版は各 repo の Package.swift が正）"
         }
       ],
       "review": {
         "last_checked": "2026-07-31",
         "checked_through": "83689e0a",
-        "reverified": "2026-08-18: upstream/develop を再 fetch。HEAD は依然 83689e0a（2026-07-01）で、last_checked 以降に新規コミットは無い。全件精読（2026-07-31）の『security fix なし』評価はそのまま有効。4.9.1 より新しい upstream リリースも無し。fetch が Demion のセキュリティレビュー時点で 7/28 と古かったため念のため取り直したが、内容は不変。",
+        "reverified": "2026-08-18: upstream/develop を再 fetch。HEAD は依然 83689e0a（2026-07-01）で、last_checked 以降に新規コミットは無い。全件精読（2026-07-31）の『security fix なし』評価はそのまま有効。4.9.1 より新しい upstream リリースも無し。fetch が Demion のセキュリティレビュー時点で 7/28 と古かったため念のため取り直したが、内容は不変。2026-11-01: 再 fetch。HEAD は依然 83689e0a で 54 件のまま、4.9.1 より新しいリリースも無し。",
         "verdict": "adopted",
-        "note": "merge-base 56267f0e から upstream/develop 83689e0a までの 54 コミットを 全件読んだ（2026-07-31、Pinakeion のセキュリティレビューの一環）。**security fix は 1 件も無い。** 内訳: テストの Swift Testing 移行 約20、CI 約8、Sendable 適合の付与 約8、swcomp（CLI・本アプリ未使用）の整理 5、Swift 6 言語モード/最低 OS の引き上げ 3。ライブラリ本体の差分は 15 ファイル +18/-34 で、**中身は全て `Sendable` 注釈**。唯一の非注釈が ZIP の customExtraFields を nonisolated(unsafe) にしたもので、上流自身が TODO で『同期は文書頼み』と認めている弱化——追随の動機にならない。**LZMA / LZMA2 / 7z / Deflate / BZip2 / XZ には 1 行も変更が無い**（＝信頼できないバイトを解析する当の部分は無風）。hotfix-4.9.1 の中身は merge-base 以前で取り込み済み。よって追随は急がない。次に見る人は 83689e0a より後だけ読めばよい。上流に提案済みで、採用されれば fork を畳んで上流 URL に戻す。"
+        "note": "merge-base 56267f0e から upstream/develop 83689e0a までの 54 コミットを 全件読んだ（2026-07-31、Pinakeion のセキュリティレビューの一環）。**security fix は 1 件も無い。** 内訳: テストの Swift Testing 移行 約20、CI 約8、Sendable 適合の付与 約8、swcomp（CLI・本アプリ未使用）の整理 5、Swift 6 言語モード/最低 OS の引き上げ 3。ライブラリ本体の差分は 15 ファイル +18/-34 で、**中身は全て `Sendable` 注釈**。唯一の非注釈が ZIP の customExtraFields を nonisolated(unsafe) にしたもので、上流自身が TODO で『同期は文書頼み』と認めている弱化——追随の動機にならない。**LZMA / LZMA2 / 7z / Deflate / BZip2 / XZ には 1 行も変更が無い**（＝信頼できないバイトを解析する当の部分は無風）。hotfix-4.9.1 の中身は merge-base 以前で取り込み済み。よって追随は急がない。次に見る人は 83689e0a より後だけ読めばよい。上流への提案はまだしていない（2026-11-01 確認、PR も issue も無い）。提案して採用されれば fork を畳んで上流 URL に戻す。"
       }
     }
   ]

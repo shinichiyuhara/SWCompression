@@ -1,7 +1,8 @@
 # SWCompression (fork)
 
 > **This is a fork of [tsolomko/SWCompression](https://github.com/tsolomko/SWCompression), branched at
-> release 4.9.1.** It adds 7-Zip BCJ branch filters and an Apple-platform fast path for LZMA/LZMA2.
+> release 4.9.1.** It adds 7-Zip BCJ branch filters, an Apple-platform fast path for LZMA/LZMA2,
+> decode progress, and hardening of the decoders against hostile input.
 > See [Differences from upstream](#differences-from-upstream) below. Everything else — including this
 > README from here down — is upstream's.
 >
@@ -212,8 +213,30 @@ completely in Swift without Objective-C, it can also be used on Linux, __and Win
 
 ## Differences from upstream
 
-Branched at **4.9.1** (`03a68e6`). Two upstream files modified, three added.
-Everything else is byte-identical to upstream.
+Branched at **4.9.1** (`03a68e6`). To list exactly what differs:
+`git diff --stat 4.9.1 sy`. As of `4.9.1-sy.12`, 28 upstream files are modified
+and 8 added, of which 4 are source files and 4 are this fork's records.
+Existing public APIs keep their signatures; on hostile input they throw where
+they used to trap. Valid input decodes as before, except 7-Zip containers beyond
+the limits `sy.11` adds (more than 64 coders or streams in a folder, or an encoded
+header over 128 MiB), which are refused.
+
+| Tag | Change |
+|---|---|
+| `sy.1` | BCJ branch filters, the `Compression` fast path, decode progress |
+| `sy.2` | Progress from the system decode path too; hosts can log fallbacks |
+| `sy.3` | Deflate: out-of-range back-reference distance |
+| `sy.4` | TAR and 7-Zip: out-of-range declared sizes |
+| `sy.5` | BZip2: out-of-range BWT pointer and MTF index |
+| `sy.6` | XZ and LZMA: reads bounded on truncated or corrupt streams |
+| `sy.7` | 7-Zip: header metadata reads bounded |
+| `sy.8` | TAR: PAX extended-header scans bounded |
+| `sy.9` | BZip2 runs and 7-Zip coder output limited; negative `szMbd` refused; `folderUnpackSizes` |
+| `sy.10` | LZ4: block and 7-Zip coder output limited |
+| `sy.11` | 7-Zip: every header read bounded; PAX `size` range; `BZip2.decompress(data:limit:)` |
+| `sy.12` | `limit:` for `GzipArchive`, `XZArchive` and `LZMA` |
+
+Sections 1–3 describe `sy.1` and `sy.2`, section 4 the rest.
 
 ### 1. 7-Zip BCJ branch filters (correctness)
 
@@ -280,8 +303,30 @@ a GUI application no one reads.
 ### 4. Decoder hardening (security)
 
 Later tags harden decoders against hostile input, turning Swift traps and
-unbounded output into thrown errors. `4.9.1-sy.9` (from Arkheion's security
-audit of 2026-10-30):
+unbounded output into thrown errors. A Swift trap cannot be caught with `try?`,
+so before these a corrupt file could crash the host, including a thumbnailer
+that opened it with no action from the user.
+
+`4.9.1-sy.3` to `sy.8` (2026-08-12) close the traps that malformed-input fuzzing
+reached. All of them throw on corrupt input where the code used to index out of
+range:
+
+- **Deflate** (`sy.3`): a back-reference distance of zero or beyond the data
+  decoded so far (RFC 1951 §3.2.5 forbids both).
+- **TAR** (`sy.4`): a declared entry size that is negative or past the buffer.
+- **7-Zip** (`sy.4`): a header region past the end of the file.
+- **BZip2** (`sy.5`): a BWT pointer outside the block, an MTF index outside the
+  live symbol list, and a run on an empty symbol list.
+- **XZ, LZMA, LZMA2** (`sy.6`): reads past the end of a truncated stream. The
+  range decoder pads with zeros past the end instead of reading, so a corrupt
+  stream fails its size or CRC check; a valid stream is consumed exactly and
+  never reaches the padding.
+- **7-Zip** (`sy.7`): reads past the end while parsing the nested header
+  metadata, including count-driven loops.
+- **TAR** (`sy.8`): PAX record scans that ran past the end looking for a
+  delimiter.
+
+`4.9.1-sy.9` (from Arkheion's security audit of 2026-10-30):
 
 - **BZip2**: the block's pre-BWT buffer is held to the size from the stream
   header. A RUNA/RUNB run previously had no ceiling, so a few dozen run symbols
@@ -318,7 +363,7 @@ audit of 2026-10-30):
 - **BZip2**: new public `BZip2.decompress(data:limit:)`, which throws
   `DecompressionLimitExceeded`.
 
-`4.9.1-sy.12`: new public `GzipArchive.unarchive(archive:limit:)`,
+`4.9.1-sy.12` (from Demion's review of 2026-11-01): new public `GzipArchive.unarchive(archive:limit:)`,
 `XZArchive.unarchive(archive:limit:)` and `LZMA.decompress(data:limit:)`, which
 throw `DecompressionLimitExceeded`. These formats decode whole into memory, and
 their ratio makes a limit on the input meaningless. The decoders already had the
@@ -326,12 +371,18 @@ internal limit; this exposes it, and adds it to the LZMA1 decoder.
 
 ### Verification
 
-The 86 upstream files carried over were checked byte-for-byte against 4.9.1.
-The decoder changes were validated by extracting real archives and comparing
-every output file against `7zz`: 4,796 files, zero mismatches, and zero silent
-fallbacks.
+The changes of sections 1–3 were validated by extracting real archives and
+comparing every output file against `7zz`: 4,796 files, zero mismatches, and
+zero silent fallbacks. That figure dates from those tags and was not repeated
+for each later one.
+
+The hardening tags add no tests to this repository. Their regression tests live
+in the applications that use the fork, which run hostile files through their own
+extraction routes. `sy.6` and `sy.7` were also checked against a corpus of 30
+valid archives, which still decoded byte-identically.
 
 ### Upstreaming
 
-These changes are offered upstream; the fork exists to carry them in the
-meantime. If they land, this fork should be retired rather than maintained.
+**None of this has been offered upstream yet** (checked 2026-11-01: no pull
+request or issue). If the changes are offered and land, this fork should be
+retired rather than maintained.

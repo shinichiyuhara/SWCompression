@@ -15,10 +15,12 @@
 
 上流に投げて待つ選択肢もあったが、Pinakeion / Skopeion の利用者にはその間ずっと
 「開けない書庫」が残る。採用されれば fork を畳んで上流 URL に戻す。
+**ただし上流にはまだ何も提案していない**（2026-11-01 確認。PR も issue も無い）。
+以前の記述「提案済み」は誤りだった。
 
-**差分の詳細（何を変え、何を意図的に実装しなかったか）は
+**差分の詳細（何を変え、何を意図的に実装しなかったか）と版ごとの一覧は
 [README.md の "Differences from upstream"](README.md#differences-from-upstream) が正。**
-ここに再掲すると二重管理になる。要約すると、上流ファイル 2 本を修正・3 本を追加:
+ここに再掲すると二重管理になる。要約すると 4 系統:
 
 1. **7-Zip BCJ 分岐フィルタ**（正しさ）— XZ Utils の `simple/*.c`（public domain）からの
    移植。デコードのみ。BCJ2 / IA64 / RISC-V は意図的に未実装。
@@ -26,6 +28,8 @@
    プラットフォームでは `#if canImport(Compression)` で上流どおりの純 Swift 経路に落ちる。
 3. **復号の進捗通知** — 高速経路とチャンクループの**両方**で tick する
    （[7z 規約 §6.1](../Conventions/seven-zip-conventions.jp.md)）。
+4. **デコーダの堅牢化**（安全）— `sy.3` 以降。壊れた入力での trap と、際限のない出力を
+   投げられるエラーに変える。回帰テストはこの repo ではなく利用側のアプリにある。
 
 ## 2. 分岐点
 
@@ -35,23 +39,22 @@
 | 分岐した版 | **4.9.1**（`03a68e67` — `Merge branch 'hotfix-4.9.1'`） |
 | merge-base | `56267f0e14c582f991ee3cc725fbe03b09ac5e3a` |
 | ライセンス | MIT（上流のまま。`LICENSE` を消さない） |
-| 配布 | SPM。利用側は `exact: "4.9.1-sy.2"` で固定する |
+| 配布 | SPM。利用側は `exact: "4.9.1-sy.N"` で固定する |
 
-## 3. 上流との距離（2026-07-31 実測）
+## 3. 上流との距離（2026-11-01 実測、`4.9.1-sy.12` の時点）
 
 ```
-git rev-list --count upstream/develop..HEAD   # 5  — こちらの独自コミット
-git rev-list --count HEAD..upstream/develop   # 54 — 未読の上流コミット
+git rev-list --count upstream/develop..HEAD   # 20 — こちらの独自コミット
+git rev-list --count HEAD..upstream/develop   # 54 — 上流だけにあるコミット（全件読了）
 ```
 
-独自 5 のうち **4 件がライブラリの変更**（BCJ・高速経路・進捗・README）で、
-残り 1 件はこの台帳の登録そのもの。**この数は横断ランナーが毎回 git に聞いて
-表示する**ので、ここに書いた値がずれても実体は分かる —— 書いてあるのは
-「いつ、何件だったか」という記録の方。
+**この数は横断ランナーが毎回 git に聞いて表示する**ので、ここに書いた値がずれても
+実体は分かる —— 書いてあるのは「いつ、何件だったか」という記録の方。
 
 **54 は「遅れている」であって「壊れている」ではない。** 上流の develop には
 4.9.1 以降の変更が積まれているが、この fork が出荷しているのは 4.9.1 系の挙動 +
-BCJ で、利用側 (`Package.resolved`) もその版を `exact` で固定している。
+README の差分で、利用側 (`Package.resolved`) もその版を `exact` で固定している。
+54 件の中身は `vendored.json` の `review` に記録がある（security fix は無い）。
 **追随は判断であって自動ではない**（規約 §0「検知は自動、版上げの適用は人間」）。
 
 ## 4. 更新手順
@@ -66,15 +69,21 @@ BCJ で、利用側 (`Package.resolved`) もその版を `exact` で固定して
 5. 新しい tag を打つ（`4.9.1-sy.N` → 上流版が上がるなら `<新版>-sy.1`）。
 6. `vendored.json` の `merge_base` / `review` を**手で**更新する。
    機械的に上げると「意図した版上げ」と「事故」の区別が付かなくなる。
-7. 利用側（Pinakeion / Skopeion / Demion）の `Package.swift` / `project.yml` の
+7. 利用側（Pinakeion / Skopeion / Arkheion / Demion）の `Package.swift` / `project.yml` の
    `exact` を上げ、各 README の記述を合わせる。
 
 ## 5. 利用しているアプリ
 
-`Package.resolved` に載るので SPM の台帳が正。2026-07-31 時点:
-**Pinakeion**（`4.9.1-sy.2`）/ **Skopeion**（`4.9.1-sy.2`）。
-2026-10-30: **Arkheion** は `4.9.1-sy.10`（sy.10 = LZ4 の出力上限）。sy.9 は（bzip2 の連長・7z の coder 出力上限・`szMbd` の負値。
-README "Decoder hardening"）。Pinakeion / Skopeion / Demion は sy.9 未適用 —— 同じ穴が残る。
+各アプリの `Package.swift` と `Package.resolved` が正。2026-11-01 時点の記録:
+
+| アプリ | 固定している版 | 備考 |
+|---|---|---|
+| Pinakeion | `4.9.1-sy.11` | |
+| Arkheion | `4.9.1-sy.10` | |
+| Skopeion | `4.9.1-sy.9` | |
+| Demion | `4.9.1-sy.9` | branch `SY/silly-mendel-aeb8a1` は `sy.12`（main に未 merge） |
+
+新しい版の穴は、その版より古いアプリに残る。
 
 **CVE が上流に出たときの追随先は上流ではなくこの fork。** 利用側の README は
 そう書いてある —— 上流の版だけ見ていると、追随したつもりで何も入っていない状態になる。
