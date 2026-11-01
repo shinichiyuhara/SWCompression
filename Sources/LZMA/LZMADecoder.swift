@@ -13,6 +13,10 @@ struct LZMADecoder {
 
     var uncompressedSize = -1
 
+    /// LOCAL PATCH (fork): throw `OutputLimitExceeded` once `out` passes this.
+    /// Checked per symbol, so it can overshoot by one match (273 bytes).
+    var limit = Int.max
+
     /// An array for storing output data.
     var out = [UInt8]()
 
@@ -110,6 +114,7 @@ struct LZMADecoder {
 
         // Main decoding cycle.
         while true {
+            guard out.count <= limit else { throw OutputLimitExceeded() }
             // If uncompressed size was defined and everything is unpacked then stop.
             if uncompressedSize == 0 && rangeDecoder.isFinishedOK {
                 break

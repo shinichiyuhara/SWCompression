@@ -318,6 +318,12 @@ audit of 2026-10-30):
 - **BZip2**: new public `BZip2.decompress(data:limit:)`, which throws
   `DecompressionLimitExceeded`.
 
+`4.9.1-sy.12`: new public `GzipArchive.unarchive(archive:limit:)`,
+`XZArchive.unarchive(archive:limit:)` and `LZMA.decompress(data:limit:)`, which
+throw `DecompressionLimitExceeded`. These formats decode whole into memory, and
+their ratio makes a limit on the input meaningless. The decoders already had the
+internal limit; this exposes it, and adds it to the LZMA1 decoder.
+
 ### Verification
 
 The 86 upstream files carried over were checked byte-for-byte against 4.9.1.

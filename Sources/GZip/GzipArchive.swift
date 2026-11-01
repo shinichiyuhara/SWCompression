@@ -48,6 +48,24 @@ public class GzipArchive: Archive {
     }
 
     /**
+     LOCAL PATCH (fork). Unarchives GZip `data`, refusing to produce more than `limit` bytes.
+
+     Deflate reaches about 1000:1, so a limit on the input does not bound the output.
+
+     - Throws: as `unarchive(archive:)` does, or `DecompressionLimitExceeded` once the output passes `limit`.
+     */
+    public static func unarchive(archive data: Data, limit: Int) throws -> Data {
+        do {
+            let member = try processMember(LsbBitReader(data: data), limit: limit)
+            guard !member.crcError
+                else { throw GzipError.wrongCRC([member]) }
+            return member.data
+        } catch is OutputLimitExceeded {
+            throw DecompressionLimitExceeded(limit: limit)
+        }
+    }
+
+    /**
      Unarchives multi-member GZip archive.
      Multi-member GZip archives are essentially several GZip archives following each other in a single file.
 
@@ -76,7 +94,7 @@ public class GzipArchive: Archive {
         return result
     }
 
-    private static func processMember(_ bitReader: LsbBitReader) throws -> Member {
+    private static func processMember(_ bitReader: LsbBitReader, limit: Int = .max) throws -> Member {
         // Valid GZip archive must contain at least 20 bytes of data (10 for the header, 2 for an empty Deflate block,
         // and 8 for checksums). In addition, since GZip format is "byte-oriented" we should ensure that members are
         // byte-aligned.
@@ -85,7 +103,7 @@ public class GzipArchive: Archive {
 
         let header = try GzipHeader(bitReader)
 
-        let memberData = try Deflate.decompress(bitReader)
+        let memberData = try Deflate.decompress(bitReader, limit: limit)
         bitReader.align()
 
         guard bitReader.bytesLeft >= 8

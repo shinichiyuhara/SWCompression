@@ -15,7 +15,8 @@ struct XZBlock {
         return data.count
     }
 
-    init(_ blockHeaderSize: UInt8, _ byteReader: LittleEndianByteReader, _ checkSize: Int) throws {
+    init(_ blockHeaderSize: UInt8, _ byteReader: LittleEndianByteReader, _ checkSize: Int,
+         limit: Int = .max) throws {
         let blockHeaderStartIndex = byteReader.offset - 1
         let realBlockHeaderSize = (blockHeaderSize.toInt() + 1) * 4
 
@@ -59,7 +60,7 @@ struct XZBlock {
                     else { throw LZMA2Error.wrongDictionarySize }
                 /// Filter property for LZMA2 is a dictionary size.
                 let filterPropeties = byteReader.byte()
-                filters.append { try LZMA2.decompress($0, filterPropeties) }
+                filters.append { try LZMA2.decompress($0, filterPropeties, limit: limit) }
             case 0x03:
                 // First, we need to check if size of Delta filter's properties is equal to 1 as expected.
                 let propertiesSize = try byteReader.multiByteDecode()

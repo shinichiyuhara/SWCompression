@@ -51,6 +51,30 @@ public class XZArchive: Archive {
     }
 
     /**
+     LOCAL PATCH (fork). Unarchives XZ `data`, refusing to produce more than `limit` bytes across all of its streams.
+
+     - Throws: as `unarchive(archive:)` does, or `DecompressionLimitExceeded` once the output would pass `limit`.
+     */
+    public static func unarchive(archive data: Data, limit: Int) throws -> Data {
+        let byteReader = LittleEndianByteReader(data: data)
+        var result = Data()
+        do {
+            while !byteReader.isFinished {
+                guard byteReader.bytesLeft >= 32
+                    else { throw XZError.wrongMagic }
+                let streamResult = try processStream(byteReader, limit: limit - result.count)
+                result.append(streamResult.data)
+                guard !streamResult.checkError
+                    else { throw XZError.wrongCheck([result]) }
+                try processPadding(byteReader)
+            }
+        } catch is OutputLimitExceeded {
+            throw DecompressionLimitExceeded(limit: limit)
+        }
+        return result
+    }
+
+    /**
      Unarchives XZ archive. Archives with multiple streams are supported,
      and uncompressed data from each stream will be stored in a separate element in the array
 
@@ -87,7 +111,8 @@ public class XZArchive: Archive {
         return result
     }
 
-    private static func processStream(_ byteReader: LittleEndianByteReader) throws -> (data: Data, checkError: Bool) {
+    private static func processStream(_ byteReader: LittleEndianByteReader,
+                                      limit: Int = .max) throws -> (data: Data, checkError: Bool) {
         var out = Data()
 
         let streamHeader = try XZStreamHeader(byteReader)
@@ -106,7 +131,8 @@ public class XZArchive: Archive {
                 indexSize = try processIndex(blockInfos, byteReader)
                 break
             } else {
-                let block = try XZBlock(blockHeaderSize, byteReader, streamHeader.checkType.size)
+                let block = try XZBlock(blockHeaderSize, byteReader, streamHeader.checkType.size,
+                                        limit: limit - out.count)
                 out.append(block.data)
                 guard byteReader.bytesLeft >= streamHeader.checkType.size
                     else { throw XZError.wrongField }
