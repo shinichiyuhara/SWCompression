@@ -78,8 +78,8 @@ README の差分で、利用側 (`Package.resolved`) もその版を `exact` で
 
 | アプリ | 固定している版 | `sy.12` の `limit:` を gzip / xz で使っているか |
 |---|---|---|
-| Pinakeion | `4.9.1-sy.12` | 未使用 |
-| Arkheion | `4.9.1-sy.12` | 未使用 |
+| Pinakeion | `4.9.1-sy.12` | 使用 |
+| Arkheion | `4.9.1-sy.12` | 使用 |
 | Skopeion | `4.9.1-sy.12` | 呼び出しなし（`CompressionInflate` を使う） |
 | Demion | `4.9.1-sy.12` | 使用 |
 
