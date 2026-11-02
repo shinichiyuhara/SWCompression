@@ -74,16 +74,16 @@ README の差分で、利用側 (`Package.resolved`) もその版を `exact` で
 
 ## 5. 利用しているアプリ
 
-各アプリの `Package.swift` と `Package.resolved` が正。2026-11-01 時点の記録:
+各アプリの `Package.swift` と `Package.resolved` が正。2026-11-02 時点の記録:
 
-| アプリ | 固定している版 | 備考 |
+| アプリ | 固定している版 | `sy.12` の `limit:` を gzip / xz で使っているか |
 |---|---|---|
-| Pinakeion | `4.9.1-sy.11` | |
-| Arkheion | `4.9.1-sy.10` | |
-| Skopeion | `4.9.1-sy.9` | |
-| Demion | `4.9.1-sy.9` | branch `SY/silly-mendel-aeb8a1` は `sy.12`（main に未 merge） |
+| Pinakeion | `4.9.1-sy.12` | 未使用 |
+| Arkheion | `4.9.1-sy.12` | 未使用 |
+| Skopeion | `4.9.1-sy.12` | 呼び出しなし（`CompressionInflate` を使う） |
+| Demion | `4.9.1-sy.12` | 使用 |
 
-新しい版の穴は、その版より古いアプリに残る。
+版を上げるだけでは、呼び出し側が使う API は効かない。
 
 **CVE が上流に出たときの追随先は上流ではなくこの fork。** 利用側の README は
 そう書いてある —— 上流の版だけ見ていると、追随したつもりで何も入っていない状態になる。
