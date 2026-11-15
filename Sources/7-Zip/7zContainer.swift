@@ -54,6 +54,13 @@ public class SevenZipContainer: Container {
 
         let byteReader = LittleEndianByteReader(data: data)
 
+        /// LOCAL PATCH (fork): start offset of each pack stream, summed once on
+        /// first use. Summing from zero for every stream was quadratic in their
+        /// number: a million Copy folders meant 5e11 additions, with every folder
+        /// size zero so a host's size check let it through (security audit
+        /// 2026-11-15, W28).
+        var packStreamOffsets: [Int]?
+
         for file in files {
             if file.isEmptyStream {
                 let info = file.isEmptyFile && !file.isAntiFile ? SevenZipEntryInfo(file, 0) : SevenZipEntryInfo(file)
@@ -95,12 +102,19 @@ public class SevenZipContainer: Container {
                 // overflow — each an uncatchable trap. Validate before reading.
                 guard streamIndex < packInfo.packSizes.count
                     else { throw SevenZipError.internalStructureError }
-                var (streamOffset, overflow) = signatureHeaderSize.addingReportingOverflow(packInfo.packPosition)
-                guard !overflow else { throw SevenZipError.internalStructureError }
-                for i in 0..<streamIndex {
-                    (streamOffset, overflow) = streamOffset.addingReportingOverflow(packInfo.packSizes[i])
+                if packStreamOffsets == nil {
+                    var offsets = [Int]()
+                    offsets.reserveCapacity(packInfo.packSizes.count)
+                    var (offset, overflow) = signatureHeaderSize.addingReportingOverflow(packInfo.packPosition)
                     guard !overflow else { throw SevenZipError.internalStructureError }
+                    for size in packInfo.packSizes {
+                        offsets.append(offset)
+                        (offset, overflow) = offset.addingReportingOverflow(size)
+                        guard !overflow else { throw SevenZipError.internalStructureError }
+                    }
+                    packStreamOffsets = offsets
                 }
+                let streamOffset = packStreamOffsets![streamIndex]
                 let packSize = packInfo.packSizes[streamIndex]
                 guard streamOffset >= 0, packSize >= 0,
                       streamOffset <= byteReader.size,

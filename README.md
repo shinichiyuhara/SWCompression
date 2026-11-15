@@ -218,8 +218,9 @@ Branched at **4.9.1** (`03a68e6`). To list exactly what differs:
 and 8 added, of which 4 are source files and 4 are this fork's records.
 Existing public APIs keep their signatures; on hostile input they throw where
 they used to trap. Valid input decodes as before, except 7-Zip containers beyond
-the limits `sy.11` adds (more than 64 coders or streams in a folder, or an encoded
-header over 128 MiB), which are refused.
+the limits `sy.11` and `sy.15` add (more than 64 coders or coder streams in a
+folder, an encoded header over 128 MiB, more than 2^21 files or 2^20 folders),
+which are refused.
 
 | Tag | Change |
 |---|---|
@@ -237,6 +238,7 @@ header over 128 MiB), which are refused.
 | `sy.12` | `limit:` for `GzipArchive`, `XZArchive` and `LZMA` |
 | `sy.13` | BZip2: zero selectors and an unchecked last code length refused; regression tests in this repo |
 | `sy.14` | TAR: PAX size governs the skip; global PAX records not copied per entry; `TarReader` loops |
+| `sy.15` | 7-Zip: ceilings on declared counts; per-file properties once each; folder streams 64 in total; pack offsets summed once |
 
 Sections 1–3 describe `sy.1` and `sy.2`, section 4 the rest.
 
@@ -391,6 +393,16 @@ preloading, Arkheion's Quick Look):
   a recursive call per special entry, which overflowed a 512 KiB stack on a
   run of 1,000 `L` headers, reads with the PAX size like `TarContainer`, and
   refuses a negative size.
+
+- **7-Zip** (`sy.15`): `info()` and `folderUnpackSizes()` themselves — the
+  calls a host makes to vet an archive — could be made to use gigabytes and
+  hours. The header's counts now have absolute ceilings (2^21 files and
+  substreams, 2^20 folders and pack streams, 4,096 kept unknown properties);
+  a 10 MB header used 2.1 GB before. The properties describing every file
+  (0x0E–0x15) may appear once each, and EmptyStream is counted once, where a
+  two-byte repeat of EmptyFile used to rescan every file. A folder's coder
+  streams are limited to 64 in total, as in 7-Zip, not per coder, and pack
+  stream offsets are summed once rather than from zero per stream.
 
 ### Verification
 

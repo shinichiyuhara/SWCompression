@@ -59,6 +59,13 @@ class SevenZipFolder {
             coders.append(coder)
             totalOutputStreams += coder.numOutStreams
             totalInputStreams += coder.numInStreams
+            // LOCAL PATCH (fork): the limit is on the folder's streams in total,
+            // as in 7-Zip. Per coder it still allowed 64 × 64 streams and bind
+            // pairs, and the searches over them are quadratic (security audit
+            // 2026-11-15, W25).
+            guard totalInputStreams <= SevenZipLimits.maxFolderStreams,
+                  totalOutputStreams <= SevenZipLimits.maxFolderStreams
+                else { throw SevenZipError.internalStructureError }
         }
 
         guard totalOutputStreams != 0

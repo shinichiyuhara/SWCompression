@@ -3,6 +3,18 @@
 Entries `4.9.1-sy.N` are this fork's (see README, "Differences from upstream").
 Earlier fork tags are listed only in the README.
 
+## 4.9.1-sy.15
+
+### Security
+
+- 7-Zip: the header's declared counts have absolute ceilings — 2^21 files and substreams, 2^20 folders and pack
+  streams, 4,096 kept unknown properties. A header could make `info()` and `folderUnpackSizes()` allocate about 200
+  times its size (audit 2026-11-15, W12).
+- 7-Zip: the file properties 0x0E–0x15 may appear once each, and EmptyStream is counted once. Repeating EmptyFile
+  rescanned every file per two header bytes (W13).
+- 7-Zip: a folder's coder streams are limited to 64 in total rather than per coder (W25), and pack stream offsets are
+  computed once instead of from zero per stream (W28).
+
 ## 4.9.1-sy.14
 
 ### Security

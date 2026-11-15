@@ -24,6 +24,9 @@ struct SevenZipProperty {
             if propertyType == 0 {
                 break
             }
+            // LOCAL PATCH (fork): security audit 2026-11-15, W12.
+            guard properties.count < SevenZipLimits.maxUnknownProperties
+                else { throw SevenZipError.internalStructureError }
             let propertySize = try bitReader.szMbd()
             properties.append(SevenZipProperty(propertyType, propertySize, try bitReader.szBytes(count: propertySize)))
         }

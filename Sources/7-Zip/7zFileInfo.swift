@@ -29,7 +29,7 @@ class SevenZipFileInfo {
         // LOCAL PATCH (fork): this loop allocates from a count alone, so 45 bytes
         // could ask for gigabytes before any guard in a host sees the result.
         // A file costs at least one header byte (its name, a UTF-16 terminator).
-        guard numFiles <= bitReader.bytesLeft
+        guard numFiles <= bitReader.bytesLeft, numFiles <= SevenZipLimits.maxFiles
             else { throw SevenZipError.internalStructureError }
         for _ in 0..<numFiles {
             files.append(File())
@@ -38,24 +38,39 @@ class SevenZipFileInfo {
         var isEmptyStream: [UInt8]?
         var isEmptyFile: [UInt8]?
         var isAntiFile: [UInt8]?
+        /// LOCAL PATCH (fork): counted once when EmptyStream is read. EmptyFile
+        /// and AntiFile used to recount it — a pass over all `numFiles` — each
+        /// time they appeared, and a property costs two header bytes, so a
+        /// header repeating them ran for hours (security audit 2026-11-15, W13).
+        var emptyStreamCount: Int?
+        /// LOCAL PATCH (fork): the properties that describe every file may
+        /// appear once each, as 7-Zip writes them. A repeat was never valid and
+        /// was the lever for W13.
+        var seenProperties = Set<UInt8>()
 
         while true {
             let propertyType = try bitReader.szByte()
             if propertyType == 0 {
                 break
             }
+            if (0x0E...0x15).contains(propertyType) {
+                guard seenProperties.insert(propertyType).inserted
+                    else { throw SevenZipError.internalStructureError }
+            }
             let propertySize = try bitReader.szMbd()
             switch propertyType {
             case 0x0E: // EmptyStream
-                isEmptyStream = try bitReader.szBits(count: numFiles)
+                let bits = try bitReader.szBits(count: numFiles)
+                isEmptyStream = bits
+                emptyStreamCount = bits.reduce(0) { $0 + Int($1) }
                 bitReader.align()
             case 0x0F: // EmptyFile
-                guard let emptyStreamCount = isEmptyStream?.filter({ $0 == 1 }).count
+                guard let emptyStreamCount = emptyStreamCount
                     else { throw SevenZipError.internalStructureError }
                 isEmptyFile = try bitReader.szBits(count: emptyStreamCount)
                 bitReader.align()
             case 0x10: // AntiFile (used in backups to indicate that file was removed)
-                guard let emptyStreamCount = isEmptyStream?.filter({ $0 == 1 }).count
+                guard let emptyStreamCount = emptyStreamCount
                     else { throw SevenZipError.internalStructureError }
                 isAntiFile = try bitReader.szBits(count: emptyStreamCount)
                 bitReader.align()
@@ -127,7 +142,8 @@ class SevenZipFileInfo {
                     else { throw SevenZipError.internalStructureError }
                 bitReader.offset += propertySize
             default: // Unknown property
-                guard bitReader.size - bitReader.offset >= propertySize
+                guard bitReader.size - bitReader.offset >= propertySize,
+                      unknownProperties.count < SevenZipLimits.maxUnknownProperties
                     else { throw SevenZipError.internalStructureError }
                 unknownProperties.append(SevenZipProperty(propertyType, propertySize,
                                                           try bitReader.szBytes(count: propertySize)))

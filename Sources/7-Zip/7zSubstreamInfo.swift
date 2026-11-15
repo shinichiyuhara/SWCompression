@@ -22,7 +22,10 @@ class SevenZipSubstreamInfo {
                 let numStreams = try bitReader.szMbd()
                 folder.numUnpackSubstreams = numStreams
                 let (total, overflow) = totalUnpackStreams.addingReportingOverflow(numStreams)
-                guard !overflow else { throw SevenZipError.internalStructureError }
+                // LOCAL PATCH (fork): a substream is a file; hold the total to
+                // the file ceiling (security audit 2026-11-15, W12).
+                guard !overflow, total <= SevenZipLimits.maxFiles
+                    else { throw SevenZipError.internalStructureError }
                 totalUnpackStreams = total
             }
             type = try bitReader.szByte()

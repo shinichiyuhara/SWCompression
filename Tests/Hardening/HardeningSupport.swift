@@ -93,3 +93,51 @@ func onSmallStack<T>(_ body: @escaping () throws -> T) throws -> T {
     done.wait()
     return try result!.get()
 }
+
+// MARK: - 7-Zip builder
+
+/// CRC-32 (IEEE), for the 7-Zip signature header.
+func crc32(_ data: Data) -> UInt32 {
+    var crc: UInt32 = 0xFFFF_FFFF
+    for byte in data {
+        crc ^= UInt32(byte)
+        for _ in 0..<8 { crc = (crc >> 1) ^ (0xEDB8_8320 & (0 &- (crc & 1))) }
+    }
+    return ~crc
+}
+
+func le(_ value: UInt64, _ count: Int) -> Data {
+    Data((0..<count).map { UInt8(truncatingIfNeeded: value >> (8 * UInt64($0))) })
+}
+
+/// A 7-Zip variable-length number. Small values take one byte; anything else
+/// the full nine-byte form.
+func szNumber(_ value: Int) -> Data {
+    value < 0x80 ? Data([UInt8(value)]) : Data([0xFF]) + le(UInt64(value), 8)
+}
+
+/// A 7-Zip container: signature header, `packed` bytes, then the plain `header`
+/// (which starts with 0x01).
+func sevenZip(header: Data, packed: Data = Data()) -> Data {
+    let startHeader = le(UInt64(packed.count), 8) + le(UInt64(header.count), 8) + le(UInt64(crc32(header)), 4)
+    return Data([0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C, 0x00, 0x04])
+        + le(UInt64(crc32(startHeader)), 4) + startHeader + packed + header
+}
+
+/// FilesInfo naming `names`, with optional extra raw properties after the names.
+func sevenZipFilesInfo(_ names: [String], extra: Data = Data()) -> Data {
+    var nameBytes = Data([0x00]) // not external
+    for name in names {
+        for unit in name.utf16 { nameBytes.append(contentsOf: [UInt8(unit & 0xFF), UInt8(unit >> 8)]) }
+        nameBytes.append(contentsOf: [0, 0])
+    }
+    return Data([0x05]) + szNumber(names.count) + Data([0x11]) + szNumber(nameBytes.count) + nameBytes
+        + extra + Data([0x00])
+}
+
+/// Concatenation without long `+` chains, which the type checker chokes on.
+func cat(_ parts: Data...) -> Data {
+    parts.reduce(into: Data()) { $0.append($1) }
+}
+
+func bytes(_ values: UInt8...) -> Data { Data(values) }

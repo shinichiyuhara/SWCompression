@@ -15,6 +15,9 @@ class SevenZipPackInfo {
     init(_ bitReader: MsbBitReader) throws {
         packPosition = try bitReader.szMbd()
         numPackStreams = try bitReader.szMbd()
+        // LOCAL PATCH (fork): security audit 2026-11-15, W12.
+        guard numPackStreams <= SevenZipLimits.maxFolders
+            else { throw SevenZipError.internalStructureError }
 
         var type = try bitReader.szByte()
 

@@ -22,6 +22,10 @@ class SevenZipCoderInfo {
         guard type == 0x0B else { throw SevenZipError.internalStructureError }
 
         numFolders = try bitReader.szMbd()
+        // LOCAL PATCH (fork): each folder is a class with coder arrays,
+        // hundreds of bytes per few header bytes (security audit 2026-11-15, W12).
+        guard numFolders <= SevenZipLimits.maxFolders
+            else { throw SevenZipError.internalStructureError }
         external = try bitReader.szByte()
 
         guard external == 0
