@@ -163,6 +163,12 @@ public class BZip2: DecompressionAlgorithm {
             else { throw BZip2Error.wrongHuffmanGroups }
 
         let selectorsCount = bitReader.int(fromBits: 15)
+        // LOCAL PATCH (fork): the first table is chosen by `selectors[0]` below,
+        // so a block with no selectors indexed an empty array — an uncatchable
+        // trap. bzip2 1.0.8 refuses `nSelectors < 1` too (security audit
+        // 2026-11-15, W3).
+        guard selectorsCount >= 1
+            else { throw BZip2Error.wrongSelector }
         var mtf = Array(0..<huffmanTablesCount)
 
         // It is impossible to calculate in advance how many bits encode table selectors. At minimum, if each selector
@@ -215,6 +221,15 @@ public class BZip2: DecompressionAlgorithm {
                     length -= (bitReader.bit().toInt() * 2 - 1)
                     bitsLeft -= 1
                 }
+                // LOCAL PATCH (fork): the range check at the top of the loop
+                // sees each length only before its deltas are applied, so the
+                // last symbol's length went unchecked. It becomes the tree's
+                // `maxBits`, and `DecodingTree` allocates 2^(maxBits+1) slots:
+                // gigabytes from 30 bits up, a negative count (trap) from 63.
+                // bzip2 1.0.8 holds every length to 1...20 (security audit
+                // 2026-11-15, W4).
+                guard length >= 1 && length <= 20
+                    else { throw BZip2Error.wrongHuffmanCodeLength }
                 codeLengths.append(CodeLength(symbol: i, codeLength: length))
             }
             let codes = Code.huffmanCodes(from: codeLengths)

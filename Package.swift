@@ -26,6 +26,14 @@ var package = Package(
             exclude: ["swcomp"],
             sources: ["Common", "7-Zip", "BZip2", "Deflate", "GZip", "LZ4", "LZMA", "LZMA2", "TAR", "XZ", "ZIP", "Zlib"],
             resources: [.copy("PrivacyInfo.xcprivacy")]),
+        // LOCAL PATCH (fork): regression tests for the hardening against hostile
+        // input. Self-contained (inputs are inline bytes), unlike upstream's
+        // tests, which need the Git LFS test-file submodule and run from the
+        // Xcode project.
+        .testTarget(
+            name: "SWCompressionHardeningTests",
+            dependencies: ["SWCompression"],
+            path: "Tests/Hardening"),
     ],
     swiftLanguageVersions: [.v5]
 )

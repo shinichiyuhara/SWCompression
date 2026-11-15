@@ -235,6 +235,7 @@ header over 128 MiB), which are refused.
 | `sy.10` | LZ4: block and 7-Zip coder output limited |
 | `sy.11` | 7-Zip: every header read bounded; PAX `size` range; `BZip2.decompress(data:limit:)` |
 | `sy.12` | `limit:` for `GzipArchive`, `XZArchive` and `LZMA` |
+| `sy.13` | BZip2: zero selectors and an unchecked last code length refused; regression tests in this repo |
 
 Sections 1–3 describe `sy.1` and `sy.2`, section 4 the rest.
 
@@ -369,6 +370,16 @@ throw `DecompressionLimitExceeded`. These formats decode whole into memory, and
 their ratio makes a limit on the input meaningless. The decoders already had the
 internal limit; this exposes it, and adds it to the LZMA1 decoder.
 
+`4.9.1-sy.13` onward come from this repository's own whole-codebase audit of
+2026-11-15 (`docs/security/audit-20261115.md`), and fix first what a host
+reaches without the user opening anything (Pinakeion's covers, Skopeion's
+preloading, Arkheion's Quick Look):
+
+- **BZip2** (`sy.13`): a block with zero selectors indexed an empty array, and
+  the last symbol of each Huffman table escaped the 1–20 code-length check, so
+  its length set the decoding tree's size — gigabytes, or a negative count
+  that trapped. Both are refused, as bzip2 1.0.8 refuses them.
+
 ### Verification
 
 The changes of sections 1–3 were validated by extracting real archives and
@@ -376,9 +387,11 @@ comparing every output file against `7zz`: 4,796 files, zero mismatches, and
 zero silent fallbacks. That figure dates from those tags and was not repeated
 for each later one.
 
-The hardening tags add no tests to this repository. Their regression tests live
-in the applications that use the fork, which run hostile files through their own
-extraction routes. `sy.6` and `sy.7` were also checked against a corpus of 30
+Up to `sy.12`, the hardening tags added no tests to this repository; their
+regression tests live in the applications that use the fork, which run hostile
+files through their own extraction routes. From `sy.13`, each fix also adds a
+self-contained test to `Tests/Hardening` (inputs are inline bytes, so it needs
+neither the Git LFS test files nor the Xcode project): `swift test`. `sy.6` and `sy.7` were also checked against a corpus of 30
 valid archives, which still decoded byte-identically.
 
 ### Upstreaming

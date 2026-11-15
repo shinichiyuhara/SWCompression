@@ -1,5 +1,18 @@
 # Changelog
 
+Entries `4.9.1-sy.N` are this fork's (see README, "Differences from upstream").
+Earlier fork tags are listed only in the README.
+
+## 4.9.1-sy.13
+
+### Security
+
+- BZip2: a block declaring zero selectors trapped (empty-array index); it now throws `BZip2Error.wrongSelector`
+  (audit 2026-11-15, W3).
+- BZip2: the last symbol of each Huffman table escaped the 1–20 code-length check, and its length sized the decoding
+  tree: gigabytes of allocation, or a trap from length 63. It now throws `BZip2Error.wrongHuffmanCodeLength` (W4).
+- Added the `SWCompressionHardeningTests` test target (`Tests/Hardening`).
+
 ## 4.9.1
 
 - Fixed an issue where `GzipError.cannotEncodeISOLatin1` is incorrectly thrown on non-Darwin platforms with Swift 6.0.
