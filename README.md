@@ -243,6 +243,7 @@ which are refused.
 | `sy.17` | GZip extra field, XZ block header and padding, and .lzma header size traps |
 | `sy.18` | `limit:` on every decoder; limited gzip/bzip2 read every member; Huffman trees sized by their codes; 7z folders unpacked once; BCJ past 4 GiB; truncated .lzma ends |
 | `sy.19` | TAR octal fields, PAX names and times; 7z Unix mode bit and anti items; LZ4 blocks in place; XZ filter order; slices accepted |
+| `sy.20` | ZIP: bounds on every structure, declared sizes enforced, one interpretation of each entry; `open(container:limit:)` |
 
 Sections 1–3 describe `sy.1` and `sy.2`, section 4 the rest.
 
@@ -456,6 +457,17 @@ preloading, Arkheion's Quick Look):
   TAR and ZIP accept a slice of a larger `Data`. Permissions are returned as
   stored, setuid included: hosts should mask them before applying.
 
+- **ZIP** (`sy.20`): upstream's ZIP reader had no bounds checks at all; every
+  structure is now checked before it is read, and 64-bit sizes and offsets
+  that do not fit `Int` throw. Extra fields are read within their own length.
+  Entries are decoded from their own compressed bytes and only up to the size
+  the central directory declares (a 200 KB zip declaring 1 byte decoded
+  200 MB before), entries may not share bytes, and `open(container:limit:)`
+  checks the declared total first. The local header must agree with the
+  central directory, a data descriptor must repeat its values, an Info-ZIP
+  Unicode Path field names the entry as other tools show it, and the end
+  record is found as libarchive finds it, in the last 64 KiB.
+
 ### Verification
 
 From `sy.16` (and again at `sy.17`–`sy.19`), a corpus made with `7zz`, `xz`, `bzip2` and `gzip` (twelve 7z
@@ -464,7 +476,10 @@ method chains including BCJ, ARM64, Delta, Deflate, BZip2, LZMA and LZMA2 with
 files) decodes byte-identically: 85 files, of which two went through the
 pure-Swift fallback inside 7z. From `sy.19` it also holds seven LZ4 frames
 made with `lz4 -BD` (dependent blocks) and ustar and pax tars from bsdtar:
-104 files, all identical.
+104 files, all identical. At `sy.20`, 11 zips from Info-ZIP `zip` (with and
+without `-fz`, stored), `ditto -c -k` (data descriptors) and `7zz` (Deflate,
+BZip2, LZMA, Copy) open with all 41 regular entries identical; the Deflate64
+one is refused as before (unsupported method).
 
 The changes of sections 1–3 were validated by extracting real archives and
 comparing every output file against `7zz`: 4,796 files, zero mismatches, and

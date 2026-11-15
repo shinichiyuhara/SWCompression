@@ -16,16 +16,25 @@ struct ZipEntryInfoHelper {
     let hasDataDescriptor: Bool
     let zip64FieldsArePresent: Bool
     let nextCdEntryOffset: Int
+    let localHeaderOffset: Int
     let dataOffset: Int
-    let compSize: UInt64
-    let uncompSize: UInt64
+    /// LOCAL PATCH (fork): the central directory's sizes — what `info()` reports
+    /// — checked to be representable and, for the compressed size, present in
+    /// the input (security audit 2026-11-15, W16, W22, W23).
+    let compSize: Int
+    let uncompSize: Int
 
     init(_ byteReader: LittleEndianByteReader, _ currentDiskNumber: UInt32) throws {
         // Read Central Directory entry.
         let cdEntry = try ZipCentralDirectoryEntry(byteReader)
 
         // Move to the location of Local Header.
-        byteReader.offset = cdEntry.localHeaderOffset.toInt()
+        // LOCAL PATCH (fork): checked (W16, W23).
+        let localHeaderOffset = try LittleEndianByteReader.zipInt(cdEntry.localHeaderOffset)
+        guard localHeaderOffset <= byteReader.size
+            else { throw ZipError.wrongSize }
+        self.localHeaderOffset = localHeaderOffset
+        byteReader.offset = localHeaderOffset
         // Read Local Header.
         let localHeader = try ZipLocalHeader(byteReader)
         try localHeader.validate(with: cdEntry, currentDiskNumber)
@@ -33,14 +42,21 @@ struct ZipEntryInfoHelper {
         // If file has data descriptor, then some properties are only present in CD entry.
         self.hasDataDescriptor = localHeader.generalPurposeBitFlags & 0x08 != 0
 
-        self.entryInfo = ZipEntryInfo(byteReader, cdEntry, localHeader, hasDataDescriptor)
-
         // Save some properties from CD entry and Local Header.
+        // LOCAL PATCH (fork): the central directory's sizes in both cases; without
+        // a data descriptor `validate` has checked that the local header agrees.
+        let compSize = try LittleEndianByteReader.zipInt(cdEntry.compSize)
+        let uncompSize = try LittleEndianByteReader.zipInt(cdEntry.uncompSize)
+        guard compSize <= byteReader.size - localHeader.dataOffset
+            else { throw ZipError.wrongSize }
+        self.compSize = compSize
+        self.uncompSize = uncompSize
+
+        self.entryInfo = ZipEntryInfo(byteReader, cdEntry, localHeader, hasDataDescriptor, size: uncompSize)
+
         self.zip64FieldsArePresent = localHeader.zip64FieldsArePresent
         self.nextCdEntryOffset = cdEntry.nextEntryOffset
         self.dataOffset = localHeader.dataOffset
-        self.compSize = hasDataDescriptor ? cdEntry.compSize : localHeader.compSize
-        self.uncompSize = hasDataDescriptor ? cdEntry.uncompSize : localHeader.uncompSize
     }
 
 }

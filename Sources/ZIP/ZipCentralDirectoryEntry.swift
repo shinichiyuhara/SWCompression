@@ -3,6 +3,7 @@
 //
 // See LICENSE for license information
 
+import Foundation
 import BitByteData
 
 struct ZipCentralDirectoryEntry {
@@ -18,6 +19,9 @@ struct ZipCentralDirectoryEntry {
     private(set) var uncompSize: UInt64
 
     let fileName: String
+    /// LOCAL PATCH (fork): the name's bytes as stored, before decoding and before
+    /// any Unicode Path field; compared with the local header's.
+    let rawFileName: Data
     let fileComment: String
 
     private(set) var diskNumberStart: UInt32
@@ -43,6 +47,8 @@ struct ZipCentralDirectoryEntry {
     let nextEntryOffset: Int
 
     init(_ byteReader: LittleEndianByteReader) throws {
+        // LOCAL PATCH (fork): the fixed part is 46 bytes (W16).
+        try byteReader.zipNeed(46)
         // Check signature.
         guard byteReader.uint32() == 0x02014b50
             else { throw ZipError.wrongSignature }
@@ -74,64 +80,84 @@ struct ZipCentralDirectoryEntry {
 
         self.localHeaderOffset = byteReader.uint64(fromBytes: 4)
 
+        // LOCAL PATCH (fork): the name, extra fields and comment must be in the
+        // input (W16).
+        try byteReader.zipNeed(fileNameLength + extraFieldLength + fileCommentLength)
+        let rawFileName = Data(byteReader.data[byteReader.offset..<byteReader.offset + fileNameLength])
         guard let fileName = byteReader.zipString(fileNameLength, useUtf8)
             else { throw ZipError.wrongTextField }
-        self.fileName = fileName
+        self.rawFileName = rawFileName
 
-        let extraFieldStart = byteReader.offset
-        var customExtraFields = [ZipExtraField]()
-        while byteReader.offset - extraFieldStart < extraFieldLength {
+        var uncompSize = self.uncompSize
+        var compSize = self.compSize
+        var localHeaderOffset = self.localHeaderOffset
+        var diskNumberStart = self.diskNumberStart
+        var extendedTimestampExtraField: ExtendedTimestampExtraField?
+        var ntfsExtraField: NtfsExtraField?
+        var infoZipNewUnixExtraField: InfoZipNewUnixExtraField?
+        var unicodePath: String?
+        self.customExtraFields = try ZipContainer.readExtraFields(byteReader, length: extraFieldLength,
+                                                                  location: .centralDirectory) { headerID, size in
             // There are a lot of possible extra fields.
-            let headerID = byteReader.uint16()
-            let size = byteReader.int(fromBytes: 2)
             switch headerID {
             case 0x0001: // Zip64
                 // Zip64 extra field is a special case, because it requires knowledge about central directory fields.
-                if self.uncompSize == 0xFFFFFFFF {
-                    self.uncompSize = byteReader.uint64()
+                // LOCAL PATCH (fork): each value is present only if its field above
+                // is all ones, and only if the extra field holds it (W24).
+                var left = size
+                func next(_ count: Int) throws {
+                    guard left >= count else { throw ZipError.wrongSize }
+                    left -= count
                 }
-                if self.compSize == 0xFFFFFFFF {
-                    self.compSize = byteReader.uint64()
+                if uncompSize == 0xFFFFFFFF {
+                    try next(8)
+                    uncompSize = byteReader.uint64()
                 }
-                if self.localHeaderOffset == 0xFFFFFFFF {
-                    self.localHeaderOffset = byteReader.uint64()
+                if compSize == 0xFFFFFFFF {
+                    try next(8)
+                    compSize = byteReader.uint64()
                 }
-                if self.diskNumberStart == 0xFFFF {
-                    self.diskNumberStart = byteReader.uint32()
+                if localHeaderOffset == 0xFFFFFFFF {
+                    try next(8)
+                    localHeaderOffset = byteReader.uint64()
+                }
+                if diskNumberStart == 0xFFFF {
+                    try next(4)
+                    diskNumberStart = byteReader.uint32()
                 }
             case 0x5455: // Extended Timestamp
-                self.extendedTimestampExtraField = ExtendedTimestampExtraField(byteReader, size,
-                                                                               location: .centralDirectory)
+                extendedTimestampExtraField = ExtendedTimestampExtraField(byteReader, size, location: .centralDirectory)
             case 0x000a: // NTFS Extra Fields
-                self.ntfsExtraField = NtfsExtraField(byteReader, size, location: .centralDirectory)
+                ntfsExtraField = NtfsExtraField(byteReader, size, location: .centralDirectory)
             case 0x7855: // Info-ZIP Unix Extra Field
                 // If there is any data for Info-ZIP Unix extra field in central directory (`size != 0`), skip it.
                 // However, according to definition of this extra field it shouldn't have any data in CD.
-                byteReader.offset += size
+                break
             case 0x7875: // Info-ZIP New Unix Extra Field
-                self.infoZipNewUnixExtraField = InfoZipNewUnixExtraField(byteReader, size, location: .centralDirectory)
-            default:
-                let customFieldOffset = byteReader.offset
-                if let customExtraFieldType = ZipContainer.customExtraFields[headerID],
-                    customExtraFieldType.id == headerID,
-                    let customExtraField = customExtraFieldType.init(byteReader, size, location: .centralDirectory),
-                    customExtraField.id == headerID {
-                    precondition(customExtraField.location == .centralDirectory,
-                                 "Custom field in Central Directory with ID=\(headerID) of type=\(customExtraFieldType)"
-                                    + " changed location.")
-                    precondition(customExtraField.size == size,
-                                 "Custom field in Central Directory with ID=\(headerID) of type=\(customExtraFieldType)"
-                                    + " changed size.")
-                    guard byteReader.offset == customFieldOffset + size
-                        else { fatalError("Custom field in Central Directory with ID=\(headerID) of" +
-                            "type=\(customExtraFieldType) failed to read exactly \(size) bytes.") }
-                    customExtraFields.append(customExtraField)
-                } else {
-                    byteReader.offset = customFieldOffset + size
+                infoZipNewUnixExtraField = InfoZipNewUnixExtraField(byteReader, size, location: .centralDirectory)
+            case 0x7075: // Info-ZIP Unicode Path
+                // LOCAL PATCH (fork): Info-ZIP, 7-Zip and libarchive show this
+                // UTF-8 name when its CRC matches the plain name's bytes; this
+                // reader showed the plain name, another name than they do (W36).
+                if size >= 5, byteReader.byte() == 1 {
+                    let nameCRC = byteReader.uint32()
+                    if nameCRC == CheckSums.crc32(rawFileName) {
+                        unicodePath = String(data: Data(byteReader.bytes(count: size - 5)), encoding: .utf8)
+                    }
                 }
+            default:
+                return false
             }
+            return true
         }
-        self.customExtraFields = customExtraFields
+        self.fileName = unicodePath ?? fileName
+        self.uncompSize = uncompSize
+        self.compSize = compSize
+        self.localHeaderOffset = localHeaderOffset
+        self.diskNumberStart = diskNumberStart
+        self.extendedTimestampExtraField = extendedTimestampExtraField
+        self.ntfsExtraField = ntfsExtraField
+        self.infoZipNewUnixExtraField = infoZipNewUnixExtraField
 
         guard let fileComment = byteReader.zipString(fileCommentLength, useUtf8)
             else { throw ZipError.wrongTextField }

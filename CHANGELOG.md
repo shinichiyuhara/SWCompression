@@ -3,6 +3,31 @@
 Entries `4.9.1-sy.N` are this fork's (see README, "Differences from upstream").
 Earlier fork tags are listed only in the README.
 
+## 4.9.1-sy.20
+
+### Added
+
+- `ZipContainer.open(container:limit:)`: refuses, before decoding, an archive whose declared entry sizes add up to more
+  than `limit` (audit 2026-11-15, W17).
+
+### Changed
+
+- ZIP: every entry must agree between its local header and the central directory — name, and without a data
+  descriptor also CRC and sizes — and a data descriptor must repeat the central directory's values; mismatches throw
+  `ZipError.wrongLocalHeader`. Entries may not share bytes. An Info-ZIP Unicode Path field (0x7075) whose CRC matches
+  gives the entry's name, as Info-ZIP, 7-Zip and libarchive show it (W22, W36).
+- ZIP: the end of central directory record is looked for in the last 65,557 bytes only, and a record whose comment ends
+  the input and whose directory ends where it starts is preferred to signature bytes inside a comment (W36, W37).
+- ZIP: an entry named with a trailing slash, of size 0 and without directory attributes, is a directory (W38).
+
+### Security
+
+- ZIP: bounds checks on every structure — end record, ZIP64 locator and record, central directory and local headers,
+  names, comments, extra fields, entry data and data descriptors; sizes and offsets of 2^63 and up throw instead of
+  turning negative (W16, W23). Extra fields are read within their own length (W24).
+- ZIP: Deflate, BZip2 and LZMA entries are decoded from their own compressed bytes and up to the size the central
+  directory declares; they ran to the end of their stream (W17).
+
 ## 4.9.1-sy.19
 
 ### Changed

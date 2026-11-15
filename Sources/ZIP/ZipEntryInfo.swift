@@ -103,7 +103,7 @@ public struct ZipEntryInfo: ContainerEntryInfo {
     public let crc: UInt32
 
     init(_ byteReader: LittleEndianByteReader, _ cdEntry: ZipCentralDirectoryEntry, _ localHeader: ZipLocalHeader,
-         _ hasDataDescriptor: Bool) {
+         _ hasDataDescriptor: Bool, size: Int) {
         self.name = cdEntry.fileName
 
         // Set Modification Time.
@@ -154,7 +154,9 @@ public struct ZipEntryInfo: ContainerEntryInfo {
             self.accessTime = nil
         }
 
-        self.size = (hasDataDescriptor ? cdEntry.uncompSize : localHeader.uncompSize).toInt()
+        // LOCAL PATCH (fork): checked by the caller; `toInt()` made 2^63 and up
+        // negative (security audit 2026-11-15, W23).
+        self.size = size
 
         self.externalFileAttributes = cdEntry.externalFileAttributes
         self.permissions = Permissions(rawValue: (0x0FFF0000 & cdEntry.externalFileAttributes) >> 16)
@@ -163,13 +165,11 @@ public struct ZipEntryInfo: ContainerEntryInfo {
         // Set entry type.
         if let unixType = ContainerEntryType((0xF0000000 & cdEntry.externalFileAttributes) >> 16) {
             self.type = unixType
-        } else if let dosAttributes = self.dosAttributes {
-            if dosAttributes.contains(.directory) {
-                self.type = .directory
-            } else {
-                self.type = .regular
-            }
-        } else if size == 0 && cdEntry.fileName.last == "/" {
+        } else if self.dosAttributes?.contains(.directory) == true || (size == 0 && cdEntry.fileName.last == "/") {
+            // LOCAL PATCH (fork): `DosAttributes(rawValue:)` never fails, so the
+            // trailing-slash branch below the DOS one was never reached and
+            // `foo/` with attributes 0 came out a regular file (security audit
+            // 2026-11-15, W38).
             self.type = .directory
         } else {
             self.type = .regular

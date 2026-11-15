@@ -8,11 +8,36 @@ import BitByteData
 
 extension LittleEndianByteReader {
 
+    /// LOCAL PATCH (fork): throws unless `count` more bytes can be read. The ZIP
+    /// reader had no bounds checks at all (upstream), so every structure read
+    /// past the end of the input on a crafted file — an uncatchable trap
+    /// (security audit 2026-11-15, W16). An out-of-range offset or length is
+    /// reported as `ZipError.wrongSize`.
+    func zipNeed(_ count: Int) throws {
+        guard count >= 0, self.offset >= 0, self.offset <= self.size, count <= self.size - self.offset
+            else { throw ZipError.wrongSize }
+    }
+
+    /// LOCAL PATCH (fork): a 64-bit size or offset from the archive as `Int`.
+    /// `toInt()` truncated, so 2^63 and up became negative and slipped past
+    /// size checks (security audit 2026-11-15, W23).
+    static func zipInt(_ value: UInt64) throws -> Int {
+        guard let result = Int(exactly: value)
+            else { throw ZipError.wrongSize }
+        return result
+    }
+
     func zipString(_ length: Int, _ useUtf8: Bool) -> String? {
         guard length > 0
             else { return "" }
+        guard length <= self.size - self.offset
+            else { return nil }
         let stringData = self.data[self.offset..<self.offset + length]
         self.offset += length
+        return Self.zipString(stringData, useUtf8)
+    }
+
+    static func zipString(_ stringData: Data, _ useUtf8: Bool) -> String? {
         if useUtf8 {
             return String(data: stringData, encoding: .utf8)
         }

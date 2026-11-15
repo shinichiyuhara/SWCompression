@@ -56,3 +56,50 @@ public enum ZipExtraFieldLocation {
     /// ZIP extra field is located in one of container's Local Headers.
     case localHeader
 }
+
+extension ZipContainer {
+
+    /// LOCAL PATCH (fork): reads the `length` bytes of extra fields at the
+    /// reader's offset, which the caller has checked are present. Every field
+    /// must fit in that area, and each is read from its own start and left at
+    /// its own end whatever its parser did — the parsers used to read fixed
+    /// amounts across field boundaries and past the input (security audit
+    /// 2026-11-15, W16, W24). Fewer than four bytes left over (zipalign's zero
+    /// padding) are skipped. `builtin` handles the IDs this library knows and
+    /// returns false for the rest, which go to `customExtraFields`.
+    static func readExtraFields(_ byteReader: LittleEndianByteReader, length: Int,
+                                location: ZipExtraFieldLocation,
+                                builtin: (_ headerID: UInt16, _ size: Int) throws -> Bool) throws -> [ZipExtraField] {
+        let end = byteReader.offset + length
+        var customExtraFields = [ZipExtraField]()
+        while byteReader.offset < end {
+            guard end - byteReader.offset >= 4 else {
+                byteReader.offset = end
+                break
+            }
+            let headerID = byteReader.uint16()
+            let size = byteReader.int(fromBytes: 2)
+            guard size <= end - byteReader.offset
+                else { throw ZipError.wrongSize }
+            let fieldStart = byteReader.offset
+            if try !builtin(headerID, size) {
+                if let customExtraFieldType = ZipContainer.customExtraFields[headerID],
+                    customExtraFieldType.id == headerID,
+                    let customExtraField = customExtraFieldType.init(byteReader, size, location: location),
+                    customExtraField.id == headerID {
+                    precondition(customExtraField.location == location,
+                                 "Custom field with ID=\(headerID) of type=\(customExtraFieldType) changed location.")
+                    precondition(customExtraField.size == size,
+                                 "Custom field with ID=\(headerID) of type=\(customExtraFieldType) changed size.")
+                    guard byteReader.offset == fieldStart + size
+                        else { fatalError("Custom field with ID=\(headerID) of type=\(customExtraFieldType)" +
+                                          " failed to read exactly \(size) bytes.") }
+                    customExtraFields.append(customExtraField)
+                }
+            }
+            byteReader.offset = fieldStart + size
+        }
+        return customExtraFields
+    }
+
+}

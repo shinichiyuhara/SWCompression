@@ -55,6 +55,11 @@ struct ZipEndOfCentralDirectory {
         if zip64RecordExists { // We need to find Zip64 end of CD locator.
             // Back to start of end of CD record.
             byteReader.offset -= 20
+            // LOCAL PATCH (fork): the locator must fit before the record; it was
+            // read from a negative offset otherwise — 22 bytes trapped (security
+            // audit 2026-11-15, W16).
+            guard byteReader.offset >= 20
+                else { throw ZipError.wrongSignature }
             // Zip64 locator takes exactly 20 bytes.
             byteReader.offset -= 20
 
@@ -66,13 +71,17 @@ struct ZipEndOfCentralDirectory {
             guard self.currentDiskNumber == zip64CDStartDisk
                 else { throw ZipError.multiVolumesNotSupported }
 
-            let zip64CDEndOffset = byteReader.int(fromBytes: 8)
+            let zip64CDEndOffset = try LittleEndianByteReader.zipInt(byteReader.uint64())
             let totalDisks = byteReader.uint32()
             guard totalDisks == 1
                 else { throw ZipError.multiVolumesNotSupported }
 
             // Now we need to move to Zip64 End of CD.
+            // LOCAL PATCH (fork): its 56 bytes must be in the input (W16, W23).
+            guard zip64CDEndOffset <= byteReader.size
+                else { throw ZipError.wrongSize }
             byteReader.offset = zip64CDEndOffset
+            try byteReader.zipNeed(56)
 
             // Check signature.
             guard byteReader.uint32() == 0x06064b50
