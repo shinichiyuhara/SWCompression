@@ -241,6 +241,7 @@ which are refused.
 | `sy.15` | 7-Zip: ceilings on declared counts; per-file properties once each; folder streams 64 in total; pack offsets summed once |
 | `sy.16` | Deflate, LZ4, LZMA and LZMA2 traps reachable as 7-Zip coders; LZMA with pb=4 decodes |
 | `sy.17` | GZip extra field, XZ block header and padding, and .lzma header size traps |
+| `sy.18` | `limit:` on every decoder; limited gzip/bzip2 read every member; Huffman trees sized by their codes; 7z folders unpacked once; BCJ past 4 GiB; truncated .lzma ends |
 
 Sections 1–3 describe `sy.1` and `sy.2`, section 4 the rest.
 
@@ -427,9 +428,23 @@ preloading, Arkheion's Quick Look):
   against the input. A .lzma header size of 2^63 overflowed on the first byte;
   sizes with the top bit set, other than "unknown", are refused.
 
+- **Output limits and work per input byte** (`sy.18`): every decoder now has
+  a `limit:` form (Deflate, Zlib, multi-member gzip, LZ4, multi-stream BZip2,
+  split XZ, LZMA2 and raw LZMA); the multi-result ones count all results
+  together. The fork's limited `GzipArchive.unarchive(archive:limit:)` and
+  `BZip2.decompress(data:limit:)` now read every concatenated member or
+  stream, as the command-line tools do, rather than silently returning the
+  first. Huffman decoding trees are linked nodes sized by their codes, not
+  complete trees of 2^(maxBits+1) slots (16 MiB for a BZip2 code of length
+  20, rebuilt per block). A 7-Zip folder is unpacked once and must produce
+  the size it declares; `open()` used to unpack it again from the next pack
+  stream. BCJ filters wrap positions at 4 GiB as 7-Zip does, the LZMA fast
+  path reserves at most 64 MiB up front, and a truncated .lzma of unknown
+  size ends with an error instead of zeros without end.
+
 ### Verification
 
-From `sy.16` (and again at `sy.17`), a corpus made with `7zz`, `xz`, `bzip2` and `gzip` (twelve 7z
+From `sy.16` (and again at `sy.17` and `sy.18`), a corpus made with `7zz`, `xz`, `bzip2` and `gzip` (twelve 7z
 method chains including BCJ, ARM64, Delta, Deflate, BZip2, LZMA and LZMA2 with
 `pb=4`, plus .xz with and without `pb=4`, .lzma, .bz2 and .gz of the same five
 files) decodes byte-identically: 85 files, of which two went through the

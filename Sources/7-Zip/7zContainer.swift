@@ -89,7 +89,14 @@ public class SevenZipContainer: Container {
 
             // There may be several streams in a single folder, so we have to iterate over them, if necessary.
             // If we switched folders or completed reading of a stream we need to move to the next stream.
-            if folderFileIndex == 0 || unpackedStreamData.isFinished {
+            // LOCAL PATCH (fork): only on switching folders. A folder is
+            // unpacked once; upstream also unpacked the *same* folder again
+            // from the next pack stream whenever its output ran out, so a
+            // folder whose output was shorter than its substreams made `open`
+            // decode M bytes N times while `folderUnpackSizes()` reported
+            // max(M, N) (security audit 2026-11-15, W26). A substream past the
+            // end of the folder's output now fails the size check below.
+            if folderFileIndex == 0 {
                 streamIndex += 1
 
                 // First, we move to the stream's offset. We don't have any guarantees that streams will be
@@ -133,7 +140,13 @@ public class SevenZipContainer: Container {
 
                 // One stream can contain data for several files, so we need to decode the stream first, then split
                 // it into files.
-                unpackedStreamData = LittleEndianByteReader(data: try folder.unpack(data: streamData))
+                let folderData = try folder.unpack(data: streamData)
+                // LOCAL PATCH (fork): the folder's output must be the size its
+                // header declares — the figure `folderUnpackSizes()` reports.
+                // The Copy coder skipped every size check (W26).
+                guard folderData.count == folder.unpackSize()
+                    else { throw SevenZipError.wrongSize }
+                unpackedStreamData = LittleEndianByteReader(data: folderData)
             }
 
             // `SevenZipSubstreamInfo` object must contain information about file's size and may also contain

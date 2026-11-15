@@ -3,6 +3,35 @@
 Entries `4.9.1-sy.N` are this fork's (see README, "Differences from upstream").
 Earlier fork tags are listed only in the README.
 
+## 4.9.1-sy.18
+
+### Added
+
+- `limit:` forms for every decoder that lacked one (audit 2026-11-15, W18): `Deflate.decompress(data:limit:)`,
+  `ZlibArchive.unarchive(archive:limit:)`, `GzipArchive.multiUnarchive(archive:limit:)`,
+  `LZ4.decompress(data:dictionary:dictionaryID:limit:)`, `LZ4.multiDecompress(data:dictionary:dictionaryID:limit:)`,
+  `BZip2.multiDecompress(data:limit:)`, `XZArchive.splitUnarchive(archive:limit:)`, `LZMA2.decompress(data:limit:)`
+  and `LZMA.decompress(data:properties:uncompressedSize:limit:)`. The multi-result forms count all results together.
+
+### Changed
+
+- `GzipArchive.unarchive(archive:limit:)` and `BZip2.decompress(data:limit:)` decode every concatenated member or
+  stream and join them, as `gzip -d` and `bzip2 -d` do; trailing zeros are ignored and other trailing bytes throw.
+  They returned the first one alone without an error (W19). The forms without `limit:` keep upstream's behaviour.
+
+### Security
+
+- Huffman decoding trees are linked nodes, not complete trees of 2^(maxBits+1) slots: a BZip2 code of length 20
+  cost 16 MiB per table, rebuilt per block, so small blocks without output burned CPU past any `limit` (W20). Deflate
+  rebuilds its trees per block more cheaply as well (W31).
+- 7-Zip: a folder is unpacked once, and its output must be the size it declares (the figure `folderUnpackSizes()`
+  reports). `open()` unpacked the same folder again from the next pack stream whenever its output ran out, and the
+  Copy coder skipped the size check (W26).
+- 7-Zip BCJ filters take positions modulo 2^32 instead of trapping past 4 GiB (W27).
+- The Apple fast path for 7-Zip LZMA and LZMA2 reserves at most 64 MiB up front instead of the declared size, which
+  trapped from 2^47 (W29).
+- LZMA: a truncated stream of unknown size throws instead of producing zeros forever (W30).
+
 ## 4.9.1-sy.17
 
 ### Security

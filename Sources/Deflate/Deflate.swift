@@ -27,6 +27,21 @@ public class Deflate: DecompressionAlgorithm {
         return try decompress(bitReader)
     }
 
+    /**
+     LOCAL PATCH (fork). Decompresses Deflate `data`, refusing to produce much more than `limit` bytes: the check runs
+     per block and per match, so the output may pass `limit` by at most one stored block (64 KiB) before it throws.
+     Deflate reaches about 1000:1, so a limit on the input does not bound the output (security audit 2026-11-15, W18).
+
+     - Throws: as `decompress(data:)` does, or `DecompressionLimitExceeded` once the output passes `limit`.
+     */
+    public static func decompress(data: Data, limit: Int) throws -> Data {
+        do {
+            return try decompress(LsbBitReader(data: data), limit: limit)
+        } catch is OutputLimitExceeded {
+            throw DecompressionLimitExceeded(limit: limit)
+        }
+    }
+
     /// `limit`: throw `OutputLimitExceeded` once the output passes this many
     /// bytes (checked per block and per match, so it overshoots by at most one
     /// stored block, 64 KiB). LOCAL PATCH (fork).

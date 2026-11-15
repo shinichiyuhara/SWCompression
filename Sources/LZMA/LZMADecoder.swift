@@ -122,6 +122,12 @@ struct LZMADecoder {
         // Main decoding cycle.
         while true {
             guard out.count <= limit else { throw OutputLimitExceeded() }
+            // LOCAL PATCH (fork): a truncated stream of unknown size used to run
+            // on forever here on the zeros fed past the end, emitting literal
+            // zeros, when no limit was given (security audit 2026-11-15, W30).
+            // Valid streams are consumed exactly, so a few bytes of slack only
+            // tolerate rounding at the very end.
+            guard rangeDecoder.bytesPastEnd <= 8 else { throw LZMAError.rangeDecoderFinishError }
             // If uncompressed size was defined and everything is unpacked then stop.
             if uncompressedSize == 0 && rangeDecoder.isFinishedOK {
                 break

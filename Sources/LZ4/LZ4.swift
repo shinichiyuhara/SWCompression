@@ -71,7 +71,23 @@ public enum LZ4: DecompressionAlgorithm {
      current platform.
      */
     public static func decompress(data: Data, dictionary: Data?, dictionaryID: UInt32? = nil) throws -> Data {
-        try decompress(data: data, dictionary: dictionary, dictionaryID: dictionaryID, limit: .max)
+        try decompress(data, dictionary, dictionaryID, limit: .max)
+    }
+
+    /**
+     LOCAL PATCH (fork). Decompresses the first LZ4 frame of `data`, as `decompress(data:dictionary:dictionaryID:)`
+     does, refusing to produce more than `limit` bytes. Length extensions let LZ4 reach about 255:1 (security audit 2026-11-15, W18).
+
+     - Throws: as `decompress(data:dictionary:dictionaryID:)` does, or `DecompressionLimitExceeded` once the output
+     would pass `limit`.
+     */
+    public static func decompress(data: Data, dictionary: Data? = nil, dictionaryID: UInt32? = nil,
+                                  limit: Int) throws -> Data {
+        do {
+            return try decompress(data, dictionary, dictionaryID, limit: limit)
+        } catch is OutputLimitExceeded {
+            throw DecompressionLimitExceeded(limit: limit)
+        }
     }
 
     /// LOCAL PATCH (fork): `limit` throws `OutputLimitExceeded` before the
@@ -80,7 +96,7 @@ public enum LZ4: DecompressionAlgorithm {
     /// is also held to the frame's maximum block size, which the LZ4 frame
     /// format says bounds a block's *decompressed* size; without it one 4 MiB
     /// block of 255-byte length extensions could ask for about a gigabyte.
-    static func decompress(data: Data, dictionary: Data?, dictionaryID: UInt32?, limit: Int) throws -> Data {
+    static func decompress(_ data: Data, _ dictionary: Data?, _ dictionaryID: UInt32?, limit: Int) throws -> Data {
         // LOCAL PATCH (fork): skippable frames are skipped in a loop. The call
         // used to recurse once per frame, and a frame is 8 bytes, so 40 KB of
         // them overflowed a 512 KiB thread stack — an uncatchable crash
@@ -140,7 +156,29 @@ public enum LZ4: DecompressionAlgorithm {
      - Returns: An array with uncompressed data from each processed non-skippable LZ4 frame as its elements.
      */
     public static func multiDecompress(data: Data, dictionary: Data? = nil, dictionaryID: UInt32? = nil) throws -> [Data] {
+        try multiDecompress(data, dictionary, dictionaryID, limit: .max)
+    }
+
+    /**
+     LOCAL PATCH (fork). Decompresses every LZ4 frame of `data`, as `multiDecompress(data:dictionary:dictionaryID:)`
+     does, refusing to produce more than `limit` bytes across all of them (security audit 2026-11-15, W18).
+
+     - Throws: as `multiDecompress(data:dictionary:dictionaryID:)` does, or `DecompressionLimitExceeded` once the
+     output would pass `limit`.
+     */
+    public static func multiDecompress(data: Data, dictionary: Data? = nil, dictionaryID: UInt32? = nil,
+                                       limit: Int) throws -> [Data] {
+        do {
+            return try multiDecompress(data, dictionary, dictionaryID, limit: limit)
+        } catch is OutputLimitExceeded {
+            throw DecompressionLimitExceeded(limit: limit)
+        }
+    }
+
+    private static func multiDecompress(_ data: Data, _ dictionary: Data?, _ dictionaryID: UInt32?,
+                                        limit: Int) throws -> [Data] {
         var result = [Data]()
+        var produced = 0
         var nextFrameOffset = data.startIndex
 
         repeat {
@@ -154,16 +192,18 @@ public enum LZ4: DecompressionAlgorithm {
 
             switch magic {
             case 0x184D2204:
-                (out, nextFrameOffset) = try LZ4.process(frame: data[nextFrameOffset...], dictionary, dictionaryID)
+                (out, nextFrameOffset) = try LZ4.process(frame: data[nextFrameOffset...], dictionary, dictionaryID,
+                                                         limit: limit - produced)
             case 0x184D2A50...0x184D2A5F:
                 nextFrameOffset += try process(skippableFrame: data[nextFrameOffset...])
             case 0x184C2102:
-                (out, nextFrameOffset) = try LZ4.process(legacyFrame: data[nextFrameOffset...])
+                (out, nextFrameOffset) = try LZ4.process(legacyFrame: data[nextFrameOffset...], limit: limit - produced)
             default:
                 throw DataError.corrupted
             }
 
             if let out = out {
+                produced += out.count
                 result.append(out)
             }
         } while nextFrameOffset < data.endIndex

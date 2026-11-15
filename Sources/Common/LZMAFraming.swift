@@ -164,7 +164,12 @@ enum LZMAFraming {
 
     private static func decodeContainer(_ framed: Data, expecting: Int) throws -> Data {
         var out = Data()
-        out.reserveCapacity(expecting)
+        // LOCAL PATCH (fork): `expecting` is the size the 7z header declares,
+        // not one the stream has shown. Reserving it outright trapped from 2^47
+        // and otherwise let a few bytes reserve any size up to the host's limit;
+        // beyond 64 MiB the buffer grows as the output arrives (security audit
+        // 2026-11-15, W29).
+        out.reserveCapacity(min(max(expecting, 0), 64 << 20))
         let bufferSize = 1 << 18
         let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
         defer { buffer.deallocate() }

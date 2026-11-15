@@ -91,8 +91,27 @@ public class XZArchive: Archive {
      - Returns: Array of unarchived data from every stream in archive.
      */
     public static func splitUnarchive(archive data: Data) throws -> [Data] {
+        try splitUnarchive(data, limit: .max)
+    }
+
+    /**
+     LOCAL PATCH (fork). Unarchives every stream of XZ `data` into its own element, as `splitUnarchive(archive:)`
+     does, refusing to produce more than `limit` bytes across all of them (security audit 2026-11-15, W18).
+
+     - Throws: as `splitUnarchive(archive:)` does, or `DecompressionLimitExceeded` once the output would pass `limit`.
+     */
+    public static func splitUnarchive(archive data: Data, limit: Int) throws -> [Data] {
+        do {
+            return try splitUnarchive(data, limit: limit)
+        } catch is OutputLimitExceeded {
+            throw DecompressionLimitExceeded(limit: limit)
+        }
+    }
+
+    private static func splitUnarchive(_ data: Data, limit: Int) throws -> [Data] {
         // Same code as in `unarchive(archive:)` but with different type of `result`.
         let byteReader = LittleEndianByteReader(data: data)
+        var produced = 0
 
         var result = [Data]()
         while !byteReader.isFinished {
@@ -100,7 +119,8 @@ public class XZArchive: Archive {
             guard byteReader.bytesLeft >= 32
                 else { throw XZError.wrongMagic }
 
-            let streamResult = try processStream(byteReader)
+            let streamResult = try processStream(byteReader, limit: limit - produced)
+            produced += streamResult.data.count
             result.append(streamResult.data)
             guard !streamResult.checkError
                 else { throw XZError.wrongCheck(result) }

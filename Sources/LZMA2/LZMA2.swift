@@ -29,6 +29,23 @@ public class LZMA2: DecompressionAlgorithm {
         return try decompress(byteReader, byteReader.byte())
     }
 
+    /**
+     LOCAL PATCH (fork). Decompresses LZMA2 `data`, as `decompress(data:)` does, refusing to produce more than `limit`
+     bytes (security audit 2026-11-15, W18).
+
+     - Throws: as `decompress(data:)` does, or `DecompressionLimitExceeded` once the output would pass `limit`.
+     */
+    public static func decompress(data: Data, limit: Int) throws -> Data {
+        let byteReader = LittleEndianByteReader(data: data)
+        guard byteReader.bytesLeft >= 1
+            else { throw LZMAError.rangeDecoderInitError }
+        do {
+            return try decompress(byteReader, byteReader.byte(), limit: limit)
+        } catch is OutputLimitExceeded {
+            throw DecompressionLimitExceeded(limit: limit)
+        }
+    }
+
     /// `limit`: throw `OutputLimitExceeded` before decoding a chunk whose
     /// header would take the output past this many bytes. LOCAL PATCH (fork).
     static func decompress(_ byteReader: LittleEndianByteReader, _ dictSizeByte: UInt8,

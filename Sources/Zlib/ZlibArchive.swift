@@ -23,12 +23,27 @@ public class ZlibArchive: Archive {
      - Returns: Unarchived data.
      */
     public static func unarchive(archive data: Data) throws -> Data {
-        /// Object with input data which supports convenient work with bit shifts.
-        let bitReader = LsbBitReader(data: data)
+        try unarchive(LsbBitReader(data: data), limit: .max)
+    }
 
+    /**
+     LOCAL PATCH (fork). Unarchives Zlib `data`, refusing to produce much more than `limit` bytes (Deflate checks per
+     block and per match, so the output may pass `limit` by at most 64 KiB before it throws; security audit 2026-11-15, W18).
+
+     - Throws: as `unarchive(archive:)` does, or `DecompressionLimitExceeded` once the output passes `limit`.
+     */
+    public static func unarchive(archive data: Data, limit: Int) throws -> Data {
+        do {
+            return try unarchive(LsbBitReader(data: data), limit: limit)
+        } catch is OutputLimitExceeded {
+            throw DecompressionLimitExceeded(limit: limit)
+        }
+    }
+
+    private static func unarchive(_ bitReader: LsbBitReader, limit: Int) throws -> Data {
         _ = try ZlibHeader(bitReader)
 
-        let out = try Deflate.decompress(bitReader)
+        let out = try Deflate.decompress(bitReader, limit: limit)
         bitReader.align()
 
         guard bitReader.bytesLeft >= 4

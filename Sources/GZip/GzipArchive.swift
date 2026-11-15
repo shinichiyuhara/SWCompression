@@ -48,21 +48,48 @@ public class GzipArchive: Archive {
     }
 
     /**
-     LOCAL PATCH (fork). Unarchives GZip `data`, refusing to produce more than `limit` bytes.
+     LOCAL PATCH (fork). Unarchives GZip `data`, refusing to produce much more than `limit` bytes in all (Deflate
+     checks per block and per match, so the output may pass `limit` by at most 64 KiB before it throws).
 
      Deflate reaches about 1000:1, so a limit on the input does not bound the output.
 
+     Unlike `unarchive(archive:)`, every member is decoded and the results are concatenated, as `gzip -d` does
+     (`cat a.gz b.gz`, bgzip). Zero bytes after the last member are ignored; anything else there throws
+     `GzipError.wrongMagic`. Returning the first member alone, as this function did up to 4.9.1-sy.17, gave other
+     contents than every other gzip reader without an error (security audit 2026-11-15, W19).
+
      - Throws: as `unarchive(archive:)` does, or `DecompressionLimitExceeded` once the output passes `limit`.
+     `GzipError.wrongCRC` carries the members decoded so far.
      */
     public static func unarchive(archive data: Data, limit: Int) throws -> Data {
         do {
-            let member = try processMember(LsbBitReader(data: data), limit: limit)
-            guard !member.crcError
-                else { throw GzipError.wrongCRC([member]) }
-            return member.data
+            let bitReader = LsbBitReader(data: data)
+            var members = [Member]()
+            var out = Data()
+            repeat {
+                let member = try processMember(bitReader, limit: limit - out.count)
+                members.append(member)
+                guard !member.crcError
+                    else { throw GzipError.wrongCRC(members) }
+                out.append(member.data)
+            } while try hasAnotherMember(bitReader)
+            return out
         } catch is OutputLimitExceeded {
             throw DecompressionLimitExceeded(limit: limit)
         }
+    }
+
+    /// LOCAL PATCH (fork): after a member, whether another follows. Trailing
+    /// zeros (tape padding) end the input; any other trailing bytes are an
+    /// error rather than silently dropped (W19).
+    private static func hasAnotherMember(_ bitReader: LsbBitReader) throws -> Bool {
+        let rest = bitReader.data[bitReader.offset...]
+        if rest.isEmpty || rest.allSatisfy({ $0 == 0 }) {
+            return false
+        }
+        guard rest.count >= 2, rest[rest.startIndex] == 0x1f, rest[rest.startIndex + 1] == 0x8b
+            else { throw GzipError.wrongMagic }
+        return true
     }
 
     /**
@@ -78,12 +105,29 @@ public class GzipArchive: Archive {
      - Returns: Unarchived data.
      */
     public static func multiUnarchive(archive data: Data) throws -> [Member] {
-        /// Object with input data which supports convenient work with bit shifts.
-        let bitReader = LsbBitReader(data: data)
+        try multiUnarchive(LsbBitReader(data: data), limit: .max)
+    }
 
+    /**
+     LOCAL PATCH (fork). Unarchives every member of GZip `data`, as `multiUnarchive(archive:)` does, refusing to
+     produce much more than `limit` bytes across all of them (at most 64 KiB more; security audit 2026-11-15, W18).
+
+     - Throws: as `multiUnarchive(archive:)` does, or `DecompressionLimitExceeded` once the output passes `limit`.
+     */
+    public static func multiUnarchive(archive data: Data, limit: Int) throws -> [Member] {
+        do {
+            return try multiUnarchive(LsbBitReader(data: data), limit: limit)
+        } catch is OutputLimitExceeded {
+            throw DecompressionLimitExceeded(limit: limit)
+        }
+    }
+
+    private static func multiUnarchive(_ bitReader: LsbBitReader, limit: Int) throws -> [Member] {
         var result = [Member]()
+        var produced = 0
         while !bitReader.isFinished {
-            let member = try processMember(bitReader)
+            let member = try processMember(bitReader, limit: limit - produced)
+            produced += member.data.count
 
             result.append(member)
 

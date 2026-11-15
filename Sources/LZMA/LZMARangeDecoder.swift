@@ -17,6 +17,11 @@ struct LZMARangeDecoder {
         return self.code == 0
     }
 
+    /// LOCAL PATCH (fork): how many zero bytes `normalize()` has fed past the end
+    /// of the input. A complete stream needs none; the decoder throws once this
+    /// passes a few bytes (security audit 2026-11-15, W30).
+    private(set) var bytesPastEnd = 0
+
     init(_ byteReader: LittleEndianByteReader) throws {
         // To initialize range decoder at least 5 bytes are necessary.
         guard byteReader.bytesLeft >= 5
@@ -46,7 +51,13 @@ struct LZMARangeDecoder {
             // otherwise read past the buffer, an uncatchable `Data`-index trap;
             // padding with 0 (the standard LZMA end-of-input convention) lets it
             // finish and fail the downstream size/CRC checks as a thrown error.
-            let next = byteReader.isFinished ? 0 : byteReader.byte()
+            let next: UInt8
+            if byteReader.isFinished {
+                next = 0
+                bytesPastEnd &+= 1
+            } else {
+                next = byteReader.byte()
+            }
             self.code = (self.code << 8) | UInt32(next)
         }
     }

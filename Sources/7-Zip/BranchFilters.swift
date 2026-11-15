@@ -88,6 +88,11 @@ enum BranchFilter {
         // is treated as having no converted predecessor.
         var prevPos: UInt32 = 0 &- 5
         let nowPos: UInt32 = 0   // 7z applies the filter to the whole folder at once
+        // LOCAL PATCH (fork): positions are taken modulo 2^32 throughout this
+        // file (`UInt32(truncatingIfNeeded:)`), as 7-Zip and XZ Utils do with
+        // their 32-bit `ip`. A plain `UInt32(pos)` trapped once a folder passed
+        // 4 GiB — reachable with 1 MB of LZMA2 zeros (security audit
+        // 2026-11-15, W27).
 
         let limit = size - 5
         var pos = 0
@@ -99,8 +104,8 @@ enum BranchFilter {
                 continue
             }
 
-            let offset = nowPos &+ UInt32(pos) &- prevPos
-            prevPos = nowPos &+ UInt32(pos)
+            let offset = nowPos &+ UInt32(truncatingIfNeeded: pos) &- prevPos
+            prevPos = nowPos &+ UInt32(truncatingIfNeeded: pos)
 
             if offset > 5 {
                 prevMask = 0
@@ -127,7 +132,7 @@ enum BranchFilter {
                 var dest: UInt32
                 while true {
                     // Decode direction: absolute → relative.
-                    dest = src &- (nowPos &+ UInt32(pos) &+ 5)
+                    dest = src &- (nowPos &+ UInt32(truncatingIfNeeded: pos) &+ 5)
 
                     if prevMask == 0 { break }
 
@@ -168,7 +173,7 @@ enum BranchFilter {
                     | (UInt32(buffer[i + 1]) << 8)
                     | UInt32(buffer[i])
                 src <<= 2
-                var dest = src &- (UInt32(i) &+ 8)
+                var dest = src &- (UInt32(truncatingIfNeeded: i) &+ 8)
                 dest >>= 2
                 buffer[i + 2] = UInt8truncating(dest >> 16)
                 buffer[i + 1] = UInt8truncating(dest >> 8)
@@ -189,7 +194,7 @@ enum BranchFilter {
                     | ((UInt32(buffer[i + 3]) & 0x7) << 8)
                     | UInt32(buffer[i + 2])
                 src <<= 1
-                var dest = src &- (UInt32(i) &+ 4)
+                var dest = src &- (UInt32(truncatingIfNeeded: i) &+ 4)
                 dest >>= 1
                 buffer[i + 1] = UInt8truncating(0xF0 | ((dest >> 19) & 0x7))
                 buffer[i]     = UInt8truncating(dest >> 11)
@@ -210,7 +215,7 @@ enum BranchFilter {
                     | (UInt32(buffer[i + 1]) << 16)
                     | (UInt32(buffer[i + 2]) << 8)
                     | (UInt32(buffer[i + 3]) & 0xFC)
-                let dest = src &- UInt32(i)
+                let dest = src &- UInt32(truncatingIfNeeded: i)
                 buffer[i]     = UInt8truncating(0x48 | ((dest >> 24) & 0x3))
                 buffer[i + 1] = UInt8truncating(dest >> 16)
                 buffer[i + 2] = UInt8truncating(dest >> 8)
@@ -231,7 +236,7 @@ enum BranchFilter {
                     | (UInt32(buffer[i + 2]) << 8)
                     | UInt32(buffer[i + 3])
                 src <<= 2
-                var dest = src &- UInt32(i)
+                var dest = src &- UInt32(truncatingIfNeeded: i)
                 dest >>= 2
                 // Re-encode the sign so the 30-bit field sits back inside a
                 // valid CALL word.
@@ -263,7 +268,7 @@ enum BranchFilter {
                 // BL: 26-bit word displacement.
                 let src = instr
                 instr = 0x9400_0000
-                var pc = UInt32(i)
+                var pc = UInt32(truncatingIfNeeded: i)
                 pc >>= 2
                 pc = 0 &- pc          // decode direction
                 instr |= (src &+ pc) & 0x03FF_FFFF
@@ -276,7 +281,7 @@ enum BranchFilter {
                     continue
                 }
                 instr &= 0x9000_001F
-                var pc = UInt32(i)
+                var pc = UInt32(truncatingIfNeeded: i)
                 pc >>= 12
                 pc = 0 &- pc          // decode direction
                 let dest = src &+ pc

@@ -79,6 +79,24 @@ public class LZMA: DecompressionAlgorithm {
         return try decompress(byteReader, properties, uncompressedSize)
     }
 
+    /**
+     LOCAL PATCH (fork). Decompresses raw LZMA `data`, as `decompress(data:properties:uncompressedSize:)` does,
+     refusing to produce more than `limit` bytes (security audit 2026-11-15, W18).
+
+     - Throws: as `decompress(data:properties:uncompressedSize:)` does, or `DecompressionLimitExceeded` once the
+     output passes `limit`.
+     */
+    public static func decompress(data: Data,
+                                  properties: LZMAProperties,
+                                  uncompressedSize: Int? = nil,
+                                  limit: Int) throws -> Data {
+        do {
+            return try decompress(LittleEndianByteReader(data: data), properties, uncompressedSize, limit: limit)
+        } catch is OutputLimitExceeded {
+            throw DecompressionLimitExceeded(limit: limit)
+        }
+    }
+
     static func decompress(_ byteReader: LittleEndianByteReader,
                            _ properties: LZMAProperties,
                            _ uncompSize: Int?,

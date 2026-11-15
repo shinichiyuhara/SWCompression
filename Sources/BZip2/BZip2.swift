@@ -48,20 +48,69 @@ public class BZip2: DecompressionAlgorithm {
     }
 
     /**
+     LOCAL PATCH (fork). Decompresses every BZip2 stream of `data`, as `multiDecompress(data:)` does, refusing to
+     produce more than `limit` bytes across all of them (security audit 2026-11-15, W18).
+
+     - Throws: as `multiDecompress(data:)` does, or `DecompressionLimitExceeded` once the output would pass `limit`.
+     */
+    public static func multiDecompress(data: Data, limit: Int) throws -> [Data] {
+        let reader = MsbBitReader(data: data)
+        var result = [Data]()
+        var produced = 0
+        do {
+            while !reader.isFinished {
+                let stream = try decompress(reader, limit: limit - produced)
+                produced += stream.count
+                result.append(stream)
+                reader.align()
+            }
+        } catch is OutputLimitExceeded {
+            throw DecompressionLimitExceeded(limit: limit)
+        }
+        return result
+    }
+
+    /**
      LOCAL PATCH (fork). Decompresses BZip2 `data`, refusing to produce more than `limit` bytes.
 
      The ratio of this format is so high that a limit on the input means nothing: a few hundred bytes can expand to
      hundreds of megabytes.
+
+     Unlike `decompress(data:)`, every concatenated stream is decoded and the results are joined, as `bzip2 -d` does
+     (pbzip2 and lbzip2 write one stream per chunk). Zero bytes after the last stream are ignored; anything else there
+     throws `BZip2Error.wrongMagic`. Returning the first stream alone, as this function did up to 4.9.1-sy.17, gave
+     other contents than every other bzip2 reader without an error (security audit 2026-11-15, W19).
 
      - Throws: `BZip2Error` as `decompress(data:)` does, or `DecompressionLimitExceeded` once the output would pass
      `limit`.
      */
     public static func decompress(data: Data, limit: Int) throws -> Data {
         do {
-            return try decompress(MsbBitReader(data: data), limit: limit)
+            let reader = MsbBitReader(data: data)
+            var out = try decompress(reader, limit: limit)
+            reader.align()
+            while try hasAnotherStream(reader) {
+                out.append(try decompress(reader, limit: limit - out.count))
+                reader.align()
+            }
+            return out
         } catch is OutputLimitExceeded {
             throw DecompressionLimitExceeded(limit: limit)
         }
+    }
+
+    /// LOCAL PATCH (fork): after a stream, whether another follows. Trailing
+    /// zeros end the input; any other trailing bytes are an error rather than
+    /// silently dropped (W19).
+    private static func hasAnotherStream(_ reader: MsbBitReader) throws -> Bool {
+        let rest = reader.data[reader.offset...]
+        if rest.isEmpty || rest.allSatisfy({ $0 == 0 }) {
+            return false
+        }
+        guard rest.count >= 3, rest[rest.startIndex] == 0x42, rest[rest.startIndex + 1] == 0x5a,
+              rest[rest.startIndex + 2] == 0x68
+            else { throw BZip2Error.wrongMagic }
+        return true
     }
 
     /// `limit`: throw `OutputLimitExceeded` before appending a block that would
