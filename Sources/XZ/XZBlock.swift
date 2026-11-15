@@ -30,7 +30,20 @@ struct XZBlock {
         // index past the end, which is an uncatchable Swift trap.
         guard byteReader.bytesLeft >= realBlockHeaderSize - 1
             else { throw XZError.wrongField }
+        // LOCAL PATCH (fork): the check above does not keep the reads inside the
+        // header, contrary to what it says: the two sizes and the filter
+        // fields are variable-length, so a header whose fields run past its
+        // declared size read on past the end of the input — a trap from 32
+        // bytes (security audit 2026-11-15, W9). Every field must end before
+        // the header's CRC; the reads that may cross it (`multiByteDecode`)
+        // bound themselves by the input and are checked right after.
+        let headerFieldsEnd = blockHeaderStartIndex + realBlockHeaderSize - 4
+        func headerFieldsFit(_ count: Int = 0) throws {
+            guard realBlockHeaderSize >= 8, byteReader.offset + count <= headerFieldsEnd
+                else { throw XZError.wrongField }
+        }
 
+        try headerFieldsFit(1)
         let blockFlags = byteReader.byte()
         /**
          Bit values 00, 01, 10, 11 indicate filters number from 1 to 4,
@@ -42,13 +55,16 @@ struct XZBlock {
 
         /// Should match size of compressed data.
         let compressedSize = blockFlags & 0x40 != 0 ? try byteReader.multiByteDecode() : -1
+        try headerFieldsFit()
 
         /// Should match the size of data after decompression.
         let uncompressedSize = blockFlags & 0x80 != 0 ? try byteReader.multiByteDecode() : -1
+        try headerFieldsFit()
 
         var filters: [(LittleEndianByteReader) throws -> Data] = []
         for _ in 0..<filtersCount {
             let filterID = try byteReader.multiByteDecode()
+            try headerFieldsFit()
             guard UInt64(filterID) < 0x4000000000000000
                 else { throw XZError.wrongFilterID }
             // Only LZMA2 filter is supported.
@@ -58,6 +74,7 @@ struct XZBlock {
                 let propertiesSize = try byteReader.multiByteDecode()
                 guard propertiesSize == 1
                     else { throw LZMA2Error.wrongDictionarySize }
+                try headerFieldsFit(1)
                 /// Filter property for LZMA2 is a dictionary size.
                 let filterPropeties = byteReader.byte()
                 filters.append { try LZMA2.decompress($0, filterPropeties, limit: limit) }
@@ -66,6 +83,7 @@ struct XZBlock {
                 let propertiesSize = try byteReader.multiByteDecode()
                 guard propertiesSize == 1
                     else { throw XZError.wrongField }
+                try headerFieldsFit(1)
                 let distance = (byteReader.byte() &+ 1).toInt()
                 filters.append { DeltaFilter.decode($0, distance) }
             default:
@@ -97,6 +115,11 @@ struct XZBlock {
 
         if unpaddedSize % 4 != 0 {
             let paddingSize = 4 - unpaddedSize % 4
+            // LOCAL PATCH (fork): the padding was read without a bounds check, so
+            // a block whose data ended the input trapped (security audit
+            // 2026-11-15, W10).
+            guard byteReader.bytesLeft >= paddingSize
+                else { throw XZError.wrongPadding }
             for _ in 0..<paddingSize {
                 let byte = byteReader.byte()
                 guard byte == 0x00

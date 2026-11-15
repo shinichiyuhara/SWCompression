@@ -3,6 +3,17 @@
 Entries `4.9.1-sy.N` are this fork's (see README, "Differences from upstream").
 Earlier fork tags are listed only in the README.
 
+## 4.9.1-sy.17
+
+### Security
+
+- GZip: an FEXTRA remainder of one to three bytes is refused; the next subfield's four-byte header was read past the
+  end of the input (audit 2026-11-15, W2). Applies to `GzipArchive` and `GzipHeader(archive:)`.
+- XZ: every block header field must end before the header's CRC; variable-length sizes and filter fields read past the
+  declared header size and the end of the input (W9). The block padding is checked against the input (W10).
+- LZMA (.lzma): a header size with the top bit set, other than all ones ("unknown"), throws
+  `LZMAError.wrongProperties`; 2^63 overflowed on the first output byte (W11).
+
 ## 4.9.1-sy.16
 
 ### Security

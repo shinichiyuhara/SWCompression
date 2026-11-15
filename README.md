@@ -240,6 +240,7 @@ which are refused.
 | `sy.14` | TAR: PAX size governs the skip; global PAX records not copied per entry; `TarReader` loops |
 | `sy.15` | 7-Zip: ceilings on declared counts; per-file properties once each; folder streams 64 in total; pack offsets summed once |
 | `sy.16` | Deflate, LZ4, LZMA and LZMA2 traps reachable as 7-Zip coders; LZMA with pb=4 decodes |
+| `sy.17` | GZip extra field, XZ block header and padding, and .lzma header size traps |
 
 Sections 1–3 describe `sy.1` and `sy.2`, section 4 the rest.
 
@@ -417,9 +418,18 @@ preloading, Arkheion's Quick Look):
   properties and decoded it with an empty table; it now enforces liblzma's
   order.
 
+- **gzip, xz and lzma containers** (`sy.17`): a gzip extra field whose last
+  one to three bytes could not hold a subfield header read past the input
+  (21 bytes trapped, also through `GzipHeader(archive:)`). An xz block
+  header's variable-length fields were bounded by the input only after the
+  declared header size had been checked, so they could run past both; each
+  field must now end before the header's CRC. The block padding is checked
+  against the input. A .lzma header size of 2^63 overflowed on the first byte;
+  sizes with the top bit set, other than "unknown", are refused.
+
 ### Verification
 
-From `sy.16`, a corpus made with `7zz`, `xz`, `bzip2` and `gzip` (twelve 7z
+From `sy.16` (and again at `sy.17`), a corpus made with `7zz`, `xz`, `bzip2` and `gzip` (twelve 7z
 method chains including BCJ, ARM64, Delta, Deflate, BZip2, LZMA and LZMA2 with
 `pb=4`, plus .xz with and without `pb=4`, .lzma, .bz2 and .gz of the same five
 files) decodes byte-identically: 85 files, of which two went through the

@@ -29,7 +29,7 @@ public class LZMA: DecompressionAlgorithm {
 
         let byteReader = LittleEndianByteReader(data: data)
         let properties = try LZMAProperties(byteReader)
-        let uncompSize = byteReader.int(fromBytes: 8)
+        let uncompSize = try headerUncompressedSize(byteReader)
         return try decompress(byteReader, properties, uncompSize)
     }
 
@@ -44,7 +44,7 @@ public class LZMA: DecompressionAlgorithm {
             else { throw LZMAError.wrongProperties }
         let byteReader = LittleEndianByteReader(data: data)
         let properties = try LZMAProperties(byteReader)
-        let uncompSize = byteReader.int(fromBytes: 8)
+        let uncompSize = try headerUncompressedSize(byteReader)
         do {
             return try decompress(byteReader, properties, uncompSize, limit: limit)
         } catch is OutputLimitExceeded {
@@ -91,6 +91,22 @@ public class LZMA: DecompressionAlgorithm {
 
         try decoder.decode()
         return Data(decoder.out)
+    }
+
+    /// LOCAL PATCH (fork): the .lzma header's size, 8 bytes little-endian, where
+    /// all ones means "unknown, look for the end marker". Read as `Int`, any
+    /// other value with the top bit set came out negative: 2^63 became
+    /// `Int.min` and the first `uncompressedSize -= 1` overflowed (a trap), and
+    /// the rest disabled the size check. Such sizes are refused (security audit
+    /// 2026-11-15, W11).
+    private static func headerUncompressedSize(_ byteReader: LittleEndianByteReader) throws -> Int {
+        let raw = byteReader.uint64()
+        if raw == UInt64.max {
+            return -1
+        }
+        guard let size = Int(exactly: raw)
+            else { throw LZMAError.wrongProperties }
+        return size
     }
 
 }

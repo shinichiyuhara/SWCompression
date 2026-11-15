@@ -123,6 +123,13 @@ public struct GzipHeader {
             guard reader.bytesLeft >= xlen && xlen >= 4
                 else { throw GzipError.wrongMagic }
             while xlen > 0 {
+                // LOCAL PATCH (fork): every subfield starts with four bytes (SI1,
+                // SI2, LEN). The check above holds `xlen` bytes in the input, but
+                // a remainder of 1–3 after a subfield still read four, up to three
+                // past the end of the input — a trap from 21 bytes (security audit
+                // 2026-11-15, W2).
+                guard xlen >= 4
+                    else { throw GzipError.wrongMagic }
                 let si1 = reader.byte()
                 headerBytes.append(si1)
 
