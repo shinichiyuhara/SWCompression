@@ -14,6 +14,14 @@ struct LZMA2Decoder {
     /// before the chunk is decoded (see `LZMA2.decompress(_:_:limit:)`).
     var limit = Int.max
 
+    /// LOCAL PATCH (fork): the stream must begin with a dictionary reset, and an
+    /// LZMA chunk must have set properties (which also resets the state)
+    /// before one that relies on them, as liblzma requires. A first chunk with
+    /// control 0x80 decoded with an empty probability table and trapped
+    /// (security audit 2026-11-15, W8).
+    private var needDictionaryReset = true
+    private var needProperties = true
+
     var out: [UInt8] {
         return self.decoder.out
     }
@@ -52,8 +60,14 @@ struct LZMA2Decoder {
                 break mainLoop
             case 1:
                 self.decoder.resetDictionary()
+                needDictionaryReset = false
+                // As in liblzma: after an uncompressed dictionary reset, the next
+                // LZMA chunk must carry properties.
+                needProperties = true
                 try self.decodeUncompressed()
             case 2:
+                guard !needDictionaryReset
+                    else { throw LZMA2Error.wrongReset }
                 try self.decodeUncompressed()
             case 3...0x7F:
                 throw LZMA2Error.wrongControlByte
@@ -78,6 +92,16 @@ struct LZMA2Decoder {
         let unpackSize = (uncompressedSizeBits.toInt() << 16) +
             self.byteReader.byte().toInt() << 8 + self.byteReader.byte().toInt() + 1
         let compressedSize = self.byteReader.byte().toInt() << 8 + self.byteReader.byte().toInt() + 1
+        if reset == 3 {
+            needDictionaryReset = false
+        } else if needDictionaryReset {
+            throw LZMA2Error.wrongReset
+        }
+        if reset >= 2 {
+            needProperties = false
+        } else if needProperties {
+            throw LZMA2Error.wrongReset
+        }
         switch reset {
         case 0:
             break

@@ -88,7 +88,14 @@ struct LZMADecoder {
         self.rep2 = 0
         self.rep3 = 0
 
-        self.probabilities = Array(repeating: LZMAConstants.probInitValue, count: 2 * 192 + 4 * 12)
+        // LOCAL PATCH (fork): the table holds isMatch at 0..<192, then isRep,
+        // isRepG0, isRepG1 and isRepG2 at 193, 205, 217 and 229 (12 each), then
+        // isRep0Long at 241 + (state << 4) + posState, whose last slot is
+        // 241 + 191 = 432. `2 * 192 + 4 * 12` is 432 slots, one short because of
+        // the gap at 192, so state 11 with posState 15 — only reachable with
+        // pb = 4 — indexed past the end. Ordinary files made with
+        // `xz --lzma2=pb=4` trapped (security audit 2026-11-15, W6).
+        self.probabilities = Array(repeating: LZMAConstants.probInitValue, count: 241 + 192)
         self.literalProbs = Array(repeating: Array(repeating: LZMAConstants.probInitValue, count: 0x300),
                                   count: 1 << (lc + lp))
 
@@ -271,7 +278,14 @@ struct LZMADecoder {
                 if uncompressedSize == 0 {
                     throw LZMAError.exceededUncompressedSize
                 }
-                if rep0 >= dictSize || (rep0 > dictEnd && dictEnd < dictSize) {
+                // LOCAL PATCH (fork): a match may reach back only over what the
+                // current dictionary holds, `dictEnd - dictStart` bytes (at most
+                // `dictSize`). The old test let `rep0 == dictEnd` through, and
+                // `byte(at:)` then took its wrap-around branch, which a linear
+                // buffer cannot satisfy: an index past the end, from a 23-byte
+                // .lzma. It also ignored an LZMA2 dictionary reset (`dictStart`)
+                // (security audit 2026-11-15, W7).
+                if rep0 >= dictEnd - dictStart {
                     throw LZMAError.notEnoughToRepeat
                 }
             }
@@ -299,7 +313,11 @@ struct LZMADecoder {
     }
 
     private func byte(at distance: Int) -> UInt8 {
-        return out[distance <= dictEnd ? dictEnd - distance : dictSize - distance + dictEnd]
+        // LOCAL PATCH (fork): `out` is linear and every distance is checked
+        // against the dictionary's contents before use (W7), so there is no
+        // wrap-around: the old branch for `distance > dictEnd` could only index
+        // out of range.
+        return out[dictEnd - distance]
     }
 
 }

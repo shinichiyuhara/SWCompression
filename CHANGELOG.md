@@ -3,6 +3,20 @@
 Entries `4.9.1-sy.N` are this fork's (see README, "Differences from upstream").
 Earlier fork tags are listed only in the README.
 
+## 4.9.1-sy.16
+
+### Security
+
+- Deflate: a stream ending right after a non-final block trapped reading the next block header; it now throws
+  `DeflateError.wrongBlockType`. Reached through gzip, zlib, ZIP and 7-Zip (audit 2026-11-15, W1).
+- LZ4: skippable frames are skipped in a loop; the recursion overflowed the stack on 40 KB of them (W5). Frame magics
+  and sizes are read without assuming alignment (Q3).
+- LZMA: the probability table was one slot short, so valid streams with `pb = 4` trapped (W6).
+- LZMA: a match reaching one byte beyond the dictionary's contents passed the distance check and indexed out of range;
+  the check now also respects an LZMA2 dictionary reset (W7).
+- LZMA2: the stream must begin with a dictionary reset, and an LZMA chunk must follow properties, as liblzma requires.
+  A first chunk without them decoded with an empty probability table and trapped (W8).
+
 ## 4.9.1-sy.15
 
 ### Security

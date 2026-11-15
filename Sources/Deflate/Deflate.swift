@@ -40,6 +40,13 @@ public class Deflate: DecompressionAlgorithm {
             else { throw DeflateError.wrongBlockType }
 
         while true {
+            // LOCAL PATCH (fork): the check above covers only the first block.
+            // A stream that ends right after a block without BFINAL (or with
+            // one or two bits left) read the next header past the end, which
+            // BitByteData's precondition turns into an uncatchable trap — from
+            // five bytes, `00 00 00 FF FF` (security audit 2026-11-15, W1).
+            guard bitReader.bitsLeft >= 3
+                else { throw DeflateError.wrongBlockType }
             /// Is this a last block?
             let isLastBit = bitReader.bit()
             /// Type of the current block.

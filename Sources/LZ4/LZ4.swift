@@ -81,24 +81,39 @@ public enum LZ4: DecompressionAlgorithm {
     /// format says bounds a block's *decompressed* size; without it one 4 MiB
     /// block of 255-byte length extensions could ask for about a gigabyte.
     static func decompress(data: Data, dictionary: Data?, dictionaryID: UInt32?, limit: Int) throws -> Data {
-        // Valid LZ4 frame must contain at least a magic number (4 bytes).
-        guard data.count >= 4
-            else { throw DataError.truncated }
+        // LOCAL PATCH (fork): skippable frames are skipped in a loop. The call
+        // used to recurse once per frame, and a frame is 8 bytes, so 40 KB of
+        // them overflowed a 512 KiB thread stack — an uncatchable crash
+        // (security audit 2026-11-15, W5).
+        var data = data
+        while true {
+            // Valid LZ4 frame must contain at least a magic number (4 bytes).
+            guard data.count >= 4
+                else { throw DataError.truncated }
 
-        // Magic number.
-        let magic = data[data.startIndex..<data.startIndex + 4].withUnsafeBytes { $0.bindMemory(to: UInt32.self)[0] }
-        switch magic {
-        case 0x184D2204:
-            return try LZ4.process(frame: data[(data.startIndex + 4)...], dictionary, dictionaryID, limit: limit).0
-        case 0x184D2A50...0x184D2A5F:
-            let frameSize = try process(skippableFrame: data[(data.startIndex + 4)...])
-            return try LZ4.decompress(data: data[(data.startIndex + 4 + frameSize)...], dictionary: dictionary,
-                                      dictionaryID: dictionaryID, limit: limit)
-        case 0x184C2102:
-            return try LZ4.process(legacyFrame: data[(data.startIndex + 4)...], limit: limit).0
-        default:
-            throw DataError.corrupted
+            // Magic number.
+            let magic = readUInt32LE(data, at: data.startIndex)
+            switch magic {
+            case 0x184D2204:
+                return try LZ4.process(frame: data[(data.startIndex + 4)...], dictionary, dictionaryID, limit: limit).0
+            case 0x184D2A50...0x184D2A5F:
+                let frameSize = try process(skippableFrame: data[(data.startIndex + 4)...])
+                data = data[(data.startIndex + 4 + frameSize)...]
+            case 0x184C2102:
+                return try LZ4.process(legacyFrame: data[(data.startIndex + 4)...], limit: limit).0
+            default:
+                throw DataError.corrupted
+            }
         }
+    }
+
+    /// LOCAL PATCH (fork): a little-endian `UInt32` at any offset. Binding the
+    /// bytes of a `Data` slice to `UInt32` assumed 4-byte alignment, which an
+    /// arbitrary frame offset does not have (security audit 2026-11-15, Q3).
+    @inline(__always)
+    static func readUInt32LE(_ data: Data, at index: Data.Index) -> UInt32 {
+        UInt32(data[index]) | UInt32(data[index + 1]) << 8 | UInt32(data[index + 2]) << 16
+            | UInt32(data[index + 3]) << 24
     }
 
     /**
@@ -133,7 +148,7 @@ public enum LZ4: DecompressionAlgorithm {
             // The input must contain at least one valid LZ4 frame, which in turn must contain at least a magic number.
             guard nextFrameOffset + 4 <= data.endIndex
                 else { throw DataError.truncated }
-            let magic = data[nextFrameOffset..<nextFrameOffset + 4].withUnsafeBytes { $0.bindMemory(to: UInt32.self)[0] }
+            let magic = readUInt32LE(data, at: nextFrameOffset)
             nextFrameOffset += 4
             var out: Data? = nil
 
@@ -159,7 +174,7 @@ public enum LZ4: DecompressionAlgorithm {
     private static func process(skippableFrame data: Data) throws -> Data.Index {
         guard data.count >= 4
             else { throw DataError.truncated }
-        let size = data[data.startIndex..<data.startIndex + 4].withUnsafeBytes { $0.bindMemory(to: UInt32.self)[0] }.toInt()
+        let size = readUInt32LE(data, at: data.startIndex).toInt()
         guard data.count >= size + 4
             else { throw DataError.truncated }
         return size + 4

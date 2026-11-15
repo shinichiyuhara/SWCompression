@@ -239,6 +239,7 @@ which are refused.
 | `sy.13` | BZip2: zero selectors and an unchecked last code length refused; regression tests in this repo |
 | `sy.14` | TAR: PAX size governs the skip; global PAX records not copied per entry; `TarReader` loops |
 | `sy.15` | 7-Zip: ceilings on declared counts; per-file properties once each; folder streams 64 in total; pack offsets summed once |
+| `sy.16` | Deflate, LZ4, LZMA and LZMA2 traps reachable as 7-Zip coders; LZMA with pb=4 decodes |
 
 Sections 1–3 describe `sy.1` and `sy.2`, section 4 the rest.
 
@@ -404,7 +405,25 @@ preloading, Arkheion's Quick Look):
   streams are limited to 64 in total, as in 7-Zip, not per coder, and pack
   stream offsets are summed once rather than from zero per stream.
 
+- **Decoders that 7-Zip folders use** (`sy.16`), each reachable from a 7z, and
+  from gzip, zlib, xz and lzma: Deflate read the next block header past the end
+  of a stream that stopped after a non-final block (five bytes trapped). LZ4
+  recursed per skippable frame (40 KB of them overflowed a 512 KiB stack) and
+  read frame magics with an aligned load at arbitrary offsets. **LZMA's
+  probability table was one slot short, so valid files made with `pb=4`
+  trapped** (an upstream bug). A match one byte beyond the dictionary's
+  contents slipped past its check, which also ignored an LZMA2 dictionary
+  reset. LZMA2 accepted an LZMA chunk before any dictionary reset or
+  properties and decoded it with an empty table; it now enforces liblzma's
+  order.
+
 ### Verification
+
+From `sy.16`, a corpus made with `7zz`, `xz`, `bzip2` and `gzip` (twelve 7z
+method chains including BCJ, ARM64, Delta, Deflate, BZip2, LZMA and LZMA2 with
+`pb=4`, plus .xz with and without `pb=4`, .lzma, .bz2 and .gz of the same five
+files) decodes byte-identically: 85 files, of which two went through the
+pure-Swift fallback inside 7z.
 
 The changes of sections 1–3 were validated by extracting real archives and
 comparing every output file against `7zz`: 4,796 files, zero mismatches, and
