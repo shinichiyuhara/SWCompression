@@ -3,6 +3,18 @@
 Entries `4.9.1-sy.N` are this fork's (see README, "Differences from upstream").
 Earlier fork tags are listed only in the README.
 
+## 4.9.1-sy.14
+
+### Security
+
+- TAR: a PAX `size` record now governs the skip to the next header, not only the entry's data. Skipping by the header
+  size let entries overlap (quadratic memory in `open`) and disagree with other tar readers about entry boundaries
+  (audit 2026-11-15, W21).
+- TAR: a global PAX header's unknown records are no longer copied into every entry; real merges are capped at 2^20
+  per parse and beyond that throw `TarError.wrongPaxHeaderEntry` (W14).
+- `TarReader.read()` loops instead of recursing per special entry (stack overflow, W15), uses the PAX size like
+  `TarContainer`, and throws `TarError.wrongField` on a negative size instead of passing it to `FileHandle` (Q2).
+
 ## 4.9.1-sy.13
 
 ### Security

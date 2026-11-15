@@ -31,6 +31,7 @@ public struct TarReader {
     private var lastLocalExtendedHeader: TarExtendedHeader?
     private var longLinkName: String?
     private var longName: String?
+    private var unknownRecordBudget = TarUnknownRecordBudget()
 
     /**
      Creates a new instance for reading TAR entries from the provided `fileHandle`.
@@ -75,65 +76,77 @@ public struct TarReader {
      - Returns: The next entry from the container or `nil` if the end of the input has been reached.
      */
     public mutating func read() throws -> TarEntry? {
-        let headerData = try getData(size: 512)
-        if headerData.count == 0 {
-            return nil
-        } else if headerData == Data(count: 512) {
-            // EOF marker case.
-            let offset = try handle.offset()
-            if try getData(size: 512) == Data(count: 512) {
+        // LOCAL PATCH (fork): a loop, not a recursive call per special entry
+        // (L, K, x, g, X). Each call kept its frame, so a run of size-0 `L`
+        // headers overflowed the stack — 1,000 of them (512 KB) on a 512 KB
+        // secondary thread, an uncatchable crash (security audit 2026-11-15, W15).
+        while true {
+            let headerData = try getData(size: 512)
+            if headerData.count == 0 {
                 return nil
-            } else {
-                // In this case we have a zero-filled block immediately followed by a non-zero-filled block which do not
-                // match the EOF marker signature. In practice, this indicates a malformed TAR container, since a
-                // zero-filled block is not a valid TAR header (and in fact the end result is an error being thrown in
-                // TarHeader initializer later down the line).
-                try handle.seek(toOffset: offset)
+            } else if headerData == Data(count: 512) {
+                // EOF marker case.
+                let offset = try handle.offset()
+                if try getData(size: 512) == Data(count: 512) {
+                    return nil
+                } else {
+                    // In this case we have a zero-filled block immediately followed by a non-zero-filled block which do
+                    // not match the EOF marker signature. In practice, this indicates a malformed TAR container, since
+                    // a zero-filled block is not a valid TAR header (and in fact the end result is an error being
+                    // thrown in TarHeader initializer later down the line).
+                    try handle.seek(toOffset: offset)
+                }
+            } else if headerData.count < 512 {
+                throw DataError.truncated
             }
-        } else if headerData.count < 512 {
-            throw DataError.truncated
-        }
-        assert(headerData.count == 512)
+            assert(headerData.count == 512)
 
-        let header = try TarHeader(LittleEndianByteReader(data: headerData))
-        // Since we explicitly initialize the header from 512 bytes-long Data, we don't have to check that we processed
-        // at most 512 bytes.
-        // Check, just in case, since we use blockStartIndex = -1 when creating TAR containers.
-        assert(header.blockStartIndex >= 0)
-        let dataStartOffset = try handle.offset()
+            let header = try TarHeader(LittleEndianByteReader(data: headerData))
+            // Since we explicitly initialize the header from 512 bytes-long Data, we don't have to check that we
+            // processed at most 512 bytes.
+            // Check, just in case, since we use blockStartIndex = -1 when creating TAR containers.
+            assert(header.blockStartIndex >= 0)
+            let dataStartOffset = try handle.offset()
 
-        let entryData = try getData(size: header.size)
-        guard entryData.count == header.size
-            else { throw DataError.truncated }
-
-        if case .special(let specialEntryType) = header.type {
-            switch specialEntryType {
-            case .globalExtendedHeader:
-                lastGlobalExtendedHeader = try TarExtendedHeader(entryData)
-            case .sunExtendedHeader:
-                fallthrough
-            case .localExtendedHeader:
-                lastLocalExtendedHeader = try TarExtendedHeader(entryData)
-            case .longLinkName:
-                longLinkName = LittleEndianByteReader(data: entryData).tarCString(maxLength: header.size)
-            case .longName:
-                longName = LittleEndianByteReader(data: entryData).tarCString(maxLength: header.size)
-            }
-            try handle.seek(toOffset: dataStartOffset + UInt64(truncatingIfNeeded: header.size.roundTo512()))
-            return try read()
-        } else {
-            let info = TarEntryInfo(header, lastGlobalExtendedHeader, lastLocalExtendedHeader, longName, longLinkName)
-            try handle.seek(toOffset: dataStartOffset + UInt64(truncatingIfNeeded: header.size.roundTo512()))
-            lastLocalExtendedHeader = nil
-            longName = nil
-            longLinkName = nil
-            if info.type == .directory {
-                // For directories TarEntry.data is set to nil.
-                var entry = TarEntry(info: info, data: nil)
-                entry.info.size = 0
-                return entry
+            if case .special(let specialEntryType) = header.type {
+                let entryData = try getPayload(size: header.size)
+                switch specialEntryType {
+                case .globalExtendedHeader:
+                    lastGlobalExtendedHeader = try TarExtendedHeader(entryData)
+                case .sunExtendedHeader:
+                    fallthrough
+                case .localExtendedHeader:
+                    lastLocalExtendedHeader = try TarExtendedHeader(entryData)
+                case .longLinkName:
+                    longLinkName = LittleEndianByteReader(data: entryData).tarCString(maxLength: header.size)
+                case .longName:
+                    longName = LittleEndianByteReader(data: entryData).tarCString(maxLength: header.size)
+                }
+                try handle.seek(toOffset: dataStartOffset + UInt64(truncatingIfNeeded: header.size.roundTo512()))
+                continue
             } else {
-                return TarEntry(info: info, data: entryData)
+                try unknownRecordBudget.charge(global: lastGlobalExtendedHeader, local: lastLocalExtendedHeader)
+                let info = TarEntryInfo(header, lastGlobalExtendedHeader, lastLocalExtendedHeader, longName,
+                                        longLinkName)
+                // LOCAL PATCH (fork): the entry's data, and the skip to the next
+                // header, use the PAX size when there is one, as POSIX requires
+                // and as `TarContainer` does. Using `header.size` here disagreed
+                // with `TarContainer.info` and with other tar readers about where
+                // entries begin (security audit 2026-11-15, W21).
+                let size = info.size ?? header.size
+                let entryData = try getPayload(size: size)
+                try handle.seek(toOffset: dataStartOffset + UInt64(truncatingIfNeeded: size.roundTo512()))
+                lastLocalExtendedHeader = nil
+                longName = nil
+                longLinkName = nil
+                if info.type == .directory {
+                    // For directories TarEntry.data is set to nil.
+                    var entry = TarEntry(info: info, data: nil)
+                    entry.info.size = 0
+                    return entry
+                } else {
+                    return TarEntry(info: info, data: entryData)
+                }
             }
         }
     }
@@ -152,6 +165,19 @@ public struct TarReader {
         // empty data since both of these situations logically seem equivalent for our purposes. This also allows us
         // to eliminate additional guard-check for the size parameter.
         return try handle.read(upToCount: size) ?? Data()
+    }
+
+    /// LOCAL PATCH (fork): an entry's payload, which must be all there. A base-256
+    /// size field can be negative, and the assertion in `getData` is gone in
+    /// release builds, which then passed the negative count to
+    /// `read(upToCount:)`; refuse it (security audit 2026-11-15, Q2).
+    private func getPayload(size: Int) throws -> Data {
+        guard size >= 0
+            else { throw TarError.wrongField }
+        let data = try getData(size: size)
+        guard data.count == size
+            else { throw DataError.truncated }
+        return data
     }
 
 }

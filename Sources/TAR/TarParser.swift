@@ -23,6 +23,7 @@ struct TarParser {
     private var lastLocalExtendedHeader: TarExtendedHeader?
     private var longLinkName: String?
     private var longName: String?
+    private var unknownRecordBudget = TarUnknownRecordBudget()
 
     init(_ data: Data) {
         self.reader = LittleEndianByteReader(data: data)
@@ -82,15 +83,20 @@ struct TarParser {
             reader.offset = dataStartIndex + header.size.roundTo512()
             return .specialEntry(specialEntryType)
         } else {
+            try unknownRecordBudget.charge(global: lastGlobalExtendedHeader, local: lastLocalExtendedHeader)
             let info = TarEntryInfo(header, lastGlobalExtendedHeader, lastLocalExtendedHeader, longName, longLinkName)
             // LOCAL PATCH (fork): a PAX record replaces `header.size`, so the
             // check above did not cover this value. `TarContainer.open` slices
             // the entry's data with it, and a negative or overflowing size traps.
-            if let size = info.size {
-                guard size >= 0, size <= reader.size - dataStartIndex else { return .truncated }
-            }
-            // Skip file data.
-            reader.offset = dataStartIndex + header.size.roundTo512()
+            let size = info.size ?? header.size
+            guard size >= 0, size <= reader.size - dataStartIndex else { return .truncated }
+            // Skip file data. LOCAL PATCH (fork): by the size the entry's data was
+            // cut with — the PAX one when present, as POSIX requires. Skipping by
+            // `header.size` instead let many entries slice the same bytes (each a
+            // separate copy in `open`: 1 GB from a 1.5 MB tar) and put entry
+            // boundaries where GNU tar and bsdtar do not see them (security audit
+            // 2026-11-15, W21).
+            reader.offset = dataStartIndex + size.roundTo512()
             lastLocalExtendedHeader = nil
             longName = nil
             longLinkName = nil

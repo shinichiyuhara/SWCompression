@@ -232,13 +232,44 @@ public struct TarEntryInfo: ContainerEntryInfo {
         self.comment = local?.comment ?? global?.comment
         if let localUnknownRecords = local?.unknownRecords {
             if let globalUnknownRecords = global?.unknownRecords {
-                self.unknownExtendedHeaderRecords = globalUnknownRecords.merging(localUnknownRecords) { $1 }
+                // LOCAL PATCH (fork): `merging` builds a new dictionary even when
+                // nothing is merged in. With a global header of K unknown records,
+                // every entry carrying a local header copied all K, so memory grew
+                // with K × entries — 1.2 GB from a 1.4 MB tar. An empty local set
+                // now shares the global dictionary (same value, no copy); real
+                // merges are budgeted by the parser (`TarUnknownRecordBudget`)
+                // (security audit 2026-11-15, W14).
+                self.unknownExtendedHeaderRecords = localUnknownRecords.isEmpty
+                    ? globalUnknownRecords
+                    : globalUnknownRecords.merging(localUnknownRecords) { $1 }
             } else {
                 self.unknownExtendedHeaderRecords = localUnknownRecords
             }
         } else {
             self.unknownExtendedHeaderRecords = global?.unknownRecords
         }
+    }
+
+}
+
+/// LOCAL PATCH (fork): caps how many global PAX records one parse may copy into
+/// entries. Each entry that has its own unknown records gets a merged copy of the
+/// global ones, so a large global header times many entries is quadratic in the
+/// input (security audit 2026-11-15, W14). A million copies is far above what a
+/// real archive needs (global headers rarely carry unknown records at all).
+struct TarUnknownRecordBudget {
+
+    static let maxMergedRecords = 1 << 20
+
+    private var merged = 0
+
+    mutating func charge(global: TarExtendedHeader?, local: TarExtendedHeader?) throws {
+        guard let global = global, let local = local,
+              !global.unknownRecords.isEmpty, !local.unknownRecords.isEmpty
+            else { return }
+        merged += global.unknownRecords.count
+        guard merged <= Self.maxMergedRecords
+            else { throw TarError.wrongPaxHeaderEntry }
     }
 
 }

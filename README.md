@@ -236,6 +236,7 @@ header over 128 MiB), which are refused.
 | `sy.11` | 7-Zip: every header read bounded; PAX `size` range; `BZip2.decompress(data:limit:)` |
 | `sy.12` | `limit:` for `GzipArchive`, `XZArchive` and `LZMA` |
 | `sy.13` | BZip2: zero selectors and an unchecked last code length refused; regression tests in this repo |
+| `sy.14` | TAR: PAX size governs the skip; global PAX records not copied per entry; `TarReader` loops |
 
 Sections 1–3 describe `sy.1` and `sy.2`, section 4 the rest.
 
@@ -379,6 +380,17 @@ preloading, Arkheion's Quick Look):
   the last symbol of each Huffman table escaped the 1–20 code-length check, so
   its length set the decoding tree's size — gigabytes, or a negative count
   that trapped. Both are refused, as bzip2 1.0.8 refuses them.
+
+- **TAR** (`sy.14`): a PAX `size` now governs the skip to the next header as
+  well as the entry's data, as POSIX requires. Skipping by the header's size
+  let many entries copy the same bytes (1 GB from a 1.5 MB tar) and put entry
+  boundaries where GNU tar and bsdtar do not see them. A global header's
+  unknown records are shared with entries that add none of their own, and the
+  copies a parse makes for entries that do are capped at 2^20 (`info()`
+  itself used 1.2 GB on a 1.4 MB tar). `TarReader.read()` is a loop rather than
+  a recursive call per special entry, which overflowed a 512 KiB stack on a
+  run of 1,000 `L` headers, reads with the PAX size like `TarContainer`, and
+  refuses a negative size.
 
 ### Verification
 
