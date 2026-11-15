@@ -195,7 +195,7 @@ struct TarHeader {
         out.append(tarInt: self.size, maxLength: 12)
 
         if let mtime = self.mtime?.timeIntervalSince1970 {
-            out.append(tarInt: Int(mtime), maxLength: 12)
+            out.append(tarInt: TarHeader.wholeSeconds(mtime), maxLength: 12)
         } else {
             out.append(tarInt: nil, maxLength: 12)
         }
@@ -273,12 +273,12 @@ struct TarHeader {
             } else if format == .gnu {
                 // Gnu format contains atime and ctime instead of a prefix field.
                 if let atime = self.atime?.timeIntervalSince1970 {
-                    out.append(tarInt: Int(atime), maxLength: 12)
+                    out.append(tarInt: TarHeader.wholeSeconds(atime), maxLength: 12)
                 } else {
                     out.append(tarInt: nil, maxLength: 12)
                 }
                 if let ctime = self.ctime?.timeIntervalSince1970 {
-                    out.append(tarInt: Int(ctime), maxLength: 12)
+                    out.append(tarInt: TarHeader.wholeSeconds(ctime), maxLength: 12)
                 } else {
                     out.append(tarInt: nil, maxLength: 12)
                 }
@@ -295,6 +295,14 @@ struct TarHeader {
         assert(out.count == 512)
 
         return out
+    }
+
+    /// LOCAL PATCH (fork): a time as whole seconds, or nil (an empty field)
+    /// when it is not finite or does not fit in `Int`. `Int(_:)` trapped on
+    /// such a value, and a PAX `mtime=1e300` read from one archive could be
+    /// passed straight to the writer (security audit 2026-11-15, W35).
+    static func wholeSeconds(_ time: Double) -> Int? {
+        Int(exactly: time.rounded(.down))
     }
 
 }

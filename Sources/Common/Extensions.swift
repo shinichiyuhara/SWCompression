@@ -68,3 +68,16 @@ extension Date {
     }
 
 }
+
+extension Data {
+
+    /// LOCAL PATCH (fork): `self` with indices from 0. The container parsers
+    /// (7-Zip, TAR, ZIP) compute absolute offsets from 0, so a slice of a
+    /// larger `Data` — valid archive or not — trapped in 7-Zip and was refused
+    /// as truncated by TAR (security audit 2026-11-15, W39). A slice is
+    /// copied once at the entry point.
+    var zeroBased: Data {
+        startIndex == 0 ? self : Data(self)
+    }
+
+}

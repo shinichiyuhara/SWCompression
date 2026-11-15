@@ -78,7 +78,12 @@ extension LittleEndianByteReader {
         } while (byte == 0 || byte == 0x20) && (actualStartIndex < maxLength)
         self.offset -= 1
 
-        for _ in actualStartIndex..<maxLength {
+        // LOCAL PATCH (fork): the byte just stepped back over is read again
+        // here, so the loop starts one earlier. Starting at `actualStartIndex`
+        // read one byte too few, and a field filled with digits to the end, as
+        // GNU tar writes a 12-digit size, lost its last digit — another size
+        // than other tar readers see (security audit 2026-11-15, W34).
+        for _ in (actualStartIndex - 1)..<maxLength {
             let byte = self.byte()
             guard byte != 0 && byte != 0x20
                 else { break }

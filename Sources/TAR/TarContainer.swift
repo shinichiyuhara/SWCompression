@@ -34,6 +34,7 @@ public class TarContainer: Container {
      - SeeAlso: `TarContainer.Format`
      */
     public static func formatOf(container data: Data) throws -> Format {
+        let data = data.zeroBased // LOCAL PATCH (fork): W39
         var parser = TarParser(data)
         var ustarEncountered = false
 
@@ -185,6 +186,7 @@ public class TarContainer: Container {
      - Returns: Array of `TarEntry`.
      */
     public static func open(container data: Data) throws -> [TarEntry] {
+        let data = data.zeroBased // LOCAL PATCH (fork): W39
         var parser = TarParser(data)
         var entries = [TarEntry]()
 
@@ -237,6 +239,7 @@ public class TarContainer: Container {
      - Returns: Array of `TarEntryInfo`.
      */
     public static func info(container data: Data) throws -> [TarEntryInfo] {
+        let data = data.zeroBased // LOCAL PATCH (fork): W39
         var parser = TarParser(data)
         var entries = [TarEntryInfo]()
 

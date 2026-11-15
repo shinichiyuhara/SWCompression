@@ -144,7 +144,7 @@ public class BZip2: DecompressionAlgorithm {
             let blockCRC32 = bitReader.uint32(fromBits: 32)
 
             if blockType == 0x314159265359 {
-                let block = try decode(bitReader, blockSize)
+                let block = try decode(bitReader, blockSize, room: limit - out.count)
                 guard block.count <= limit - out.count else { throw OutputLimitExceeded() }
                 out.append(Data(block))
                 guard CheckSums.bzip2crc32(block) == blockCRC32
@@ -163,7 +163,12 @@ public class BZip2: DecompressionAlgorithm {
         return out
     }
 
-    private static func decode(_ bitReader: MsbBitReader, _ blockSize: BlockSize) throws -> [UInt8] {
+    /// `room`: LOCAL PATCH (fork) — the output this block may still add. The
+    /// final run-length stage can expand a 900 kB block to about 46 MB, so it
+    /// is held to `room` as it goes rather than compared afterwards (security
+    /// audit 2026-11-15, W32).
+    private static func decode(_ bitReader: MsbBitReader, _ blockSize: BlockSize,
+                               room: Int = .max) throws -> [UInt8] {
         // Truncation checks: there is no such thing as "empty BZip2 blocks". Empty data after compression produces
         // only a "CRC32 block". As such when processing a normal BZip2 block we can assume that various BZip2
         // structures (such as table selectors or code lengths) are present, and there are at least some symbols encoded.
@@ -364,12 +369,14 @@ public class BZip2: DecompressionAlgorithm {
         // Run Length Decoding
         var i = 0
         var out = [UInt8]()
-        out.reserveCapacity(blockSize.sizeInKilobytes * 1000)
+        out.reserveCapacity(min(blockSize.sizeInKilobytes * 1000, max(room, 0)))
         while i < nt.count {
             if i < nt.count - 4 && nt[i] == nt[i + 1] && nt[i] == nt[i + 2] && nt[i] == nt[i + 3] {
                 // While the reference implementation of BZip2 doesn't produce such output, the "specification"
                 // technically allows run lengths greater than 255. To allow this we have to convert to Int.
                 let runLength = nt[i + 4].toInt() + 4
+                guard runLength <= room - out.count
+                    else { throw OutputLimitExceeded() }
                 for _ in 0..<runLength {
                     out.append(nt[i])
                 }

@@ -3,6 +3,28 @@
 Entries `4.9.1-sy.N` are this fork's (see README, "Differences from upstream").
 Earlier fork tags are listed only in the README.
 
+## 4.9.1-sy.19
+
+### Changed
+
+- 7-Zip: the upper 16 bits of a file's attributes are read as a Unix mode only when 7-Zip's Unix-extension bit
+  (0x8000) is set; otherwise `permissions` is nil and the type comes from the DOS attributes (audit 2026-11-15, W40).
+- 7-Zip: `info()` gives an anti item no size, matching `open()`, which gives it no data (W41).
+- TAR: a PAX `path`, `linkpath` or `size` that is not UTF-8 or holds a NUL throws `TarError.wrongPaxHeaderEntry`; it
+  was dropped in favour of the basic header's value (W36). PAX times that are not finite whole seconds are ignored
+  (W35).
+- XZ: LZMA2 must be the last filter of a block and only the last, as the format requires (W43).
+- The permissions of every container are documented as stored, setuid, setgid and sticky included (W40).
+
+### Security
+
+- TAR: an octal field filled to its last byte, as GNU tar writes 12-digit sizes, lost its last digit (W34).
+- TAR and gzip writers: times that are not finite or do not fit in `Int` are written as empty / unknown instead of
+  trapping (W35); the TAR writer puts a long link name in PAX by the link name's length, not the name's (W42).
+- 7-Zip, TAR and ZIP accept a slice of a larger `Data`; 7-Zip read the wrong bytes or trapped (W39).
+- LZ4: blocks are decoded into the frame's output instead of copying the previous 64 KiB per dependent block (W33).
+- BZip2: a block's run-length stage is held to `limit` as it goes (W32, in part).
+
 ## 4.9.1-sy.18
 
 ### Added

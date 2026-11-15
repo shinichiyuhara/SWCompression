@@ -343,7 +343,18 @@ public enum LZ4: DecompressionAlgorithm {
         guard UInt8(truncatingIfNeeded: (headerChecksum >> 8) & 0xFF) == reader.byte()
             else { throw DataError.corrupted }
 
-        var out = Data()
+        // LOCAL PATCH (fork): blocks are decoded straight into `bytes`, the
+        // frame's output so far. Each dependent block used to get a fresh copy
+        // of the previous 64 KiB as its dictionary, so a run of 5-byte blocks
+        // copied 64 KiB per 5 input bytes (security audit 2026-11-15, W33).
+        // An external dictionary is kept in front of the output (its last
+        // 64 KiB, all that an offset can reach) and dropped at the end.
+        var bytes = [UInt8]()
+        if !independentBlocks, let dictionary = dictionary {
+            bytes.append(contentsOf: dictionary[max(dictionary.endIndex - 64 * 1024, dictionary.startIndex)...])
+        }
+        let prefixCount = bytes.count
+        let dictionaryWindow = dictionary.map { $0[max($0.endIndex - 64 * 1024, $0.startIndex)...] }
         while true {
             guard reader.bytesLeft >= 4
                 else { throw DataError.truncated }
@@ -369,26 +380,26 @@ public enum LZ4: DecompressionAlgorithm {
             guard !blockChecksumPresent || XxHash32.hash(data: blockData) == reader.uint32()
                 else { throw DataError.corrupted }
 
+            let produced = bytes.count - prefixCount
             if compressed {
-                if independentBlocks {
-                    out.append(Data(try LZ4.process(block: blockData, dictionary,
-                                                    maxOutput: maxBlockSize, limit: limit - out.count)))
+                if !independentBlocks {
+                    try LZ4.process(block: blockData, into: &bytes, floor: 0,
+                                    maxOutput: maxBlockSize, limit: limit - produced)
+                } else if let dictionaryWindow = dictionaryWindow {
+                    // An independent block sees only the dictionary: it still
+                    // gets a copy (at most 64 KiB), as before.
+                    bytes.append(contentsOf: try LZ4.process(block: blockData, dictionaryWindow,
+                                                             maxOutput: maxBlockSize, limit: limit - produced))
                 } else {
-                    if out.isEmpty, let dictionary = dictionary {
-                        out.append(Data(try LZ4.process(block: blockData,
-                                                   dictionary[max(dictionary.endIndex - 64 * 1024, dictionary.startIndex)...],
-                                                   maxOutput: maxBlockSize, limit: limit - out.count)))
-                    } else {
-                        out.append(Data(try LZ4.process(block: blockData,
-                                                   out[max(out.endIndex - 64 * 1024, out.startIndex)...],
-                                                   maxOutput: maxBlockSize, limit: limit - out.count)))
-                    }
+                    try LZ4.process(block: blockData, into: &bytes, floor: bytes.count,
+                                    maxOutput: maxBlockSize, limit: limit - produced)
                 }
             } else {
-                guard blockData.count <= limit - out.count else { throw OutputLimitExceeded() }
-                out.append(blockData)
+                guard blockData.count <= limit - produced else { throw OutputLimitExceeded() }
+                bytes.append(contentsOf: blockData)
             }
         }
+        let out = Data(bytes[prefixCount...])
         if contentSizePresent {
             guard out.count == contentSize
                 else { throw DataError.corrupted }
@@ -407,8 +418,18 @@ public enum LZ4: DecompressionAlgorithm {
     /// `OutputLimitExceeded`). LOCAL PATCH (fork).
     private static func process(block data: Data, _ dict: Data? = nil,
                                 maxOutput: Int = .max, limit: Int = .max) throws -> [UInt8] {
-        let reader = LittleEndianByteReader(data: data)
         var out = dict?.withUnsafeBytes { $0.map { $0 } } ?? [UInt8]()
+        let outStartIndex = out.endIndex
+        try process(block: data, into: &out, floor: 0, maxOutput: maxOutput, limit: limit)
+        return Array(out[outStartIndex...])
+    }
+
+    /// LOCAL PATCH (fork): decodes one block by appending to `out`. Matches may
+    /// reach back to index `floor` of `out` (the start of the window: the
+    /// dictionary, earlier blocks, or only this block).
+    private static func process(block data: Data, into out: inout [UInt8], floor: Int,
+                                maxOutput: Int = .max, limit: Int = .max) throws {
+        let reader = LittleEndianByteReader(data: data)
         let outStartIndex = out.endIndex
 
         // These two variables are used in verifying the end of block restrictions.
@@ -457,7 +478,7 @@ public enum LZ4: DecompressionAlgorithm {
                 else { throw DataError.truncated }
             let offset = reader.uint16().toInt()
             // The value of 0 is not valid.
-            guard offset > 0 && offset <= out.endIndex
+            guard offset > 0 && offset <= out.endIndex - floor
                 else { throw DataError.corrupted }
 
             var matchLength = 4 + (token & 0xF).toInt()
@@ -487,8 +508,6 @@ public enum LZ4: DecompressionAlgorithm {
                 out.append(out[matchStartIndex + i])
             }
         }
-
-        return Array(out[outStartIndex...])
     }
 
     private static func checkRoom(_ count: Int, produced: Int, _ maxOutput: Int, _ limit: Int) throws {

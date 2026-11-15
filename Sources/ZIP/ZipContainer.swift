@@ -39,6 +39,7 @@ public class ZipContainer: Container {
      - Returns: Array of `ZipEntry`.
      */
     public static func open(container data: Data) throws -> [ZipEntry] {
+        let data = data.zeroBased // LOCAL PATCH (fork): W39
         let helpers = try infoWithHelper(data)
         var entries = [ZipEntry]()
 
@@ -129,6 +130,7 @@ public class ZipContainer: Container {
      - Returns: Array of `ZipEntryInfo`.
      */
     public static func info(container data: Data) throws -> [ZipEntryInfo] {
+        let data = data.zeroBased // LOCAL PATCH (fork): W39
         return try infoWithHelper(data).map { $0.entryInfo }
     }
 

@@ -69,8 +69,20 @@ struct TarExtendedHeader {
                 else { throw TarError.wrongPaxHeaderEntry }
             i += 1
 
-            guard let value = String(data: Data(valueBytes), encoding: .utf8)
-                else { continue }
+            // LOCAL PATCH (fork): `path`, `linkpath` and `size` decide what an
+            // entry is. Dropping an undecodable one silently fell back to the
+            // basic header's name or size, which other readers do not use, and a
+            // NUL left a name that file-system calls cut short — both ways to
+            // show a host another entry than other tools show (security audit
+            // 2026-11-15, W36). Such records are refused.
+            let decisive = key == "path" || key == "linkpath" || key == "size"
+            guard let value = String(data: Data(valueBytes), encoding: .utf8) else {
+                if decisive { throw TarError.wrongPaxHeaderEntry }
+                continue
+            }
+            if decisive && valueBytes.contains(0) {
+                throw TarError.wrongPaxHeaderEntry
+            }
 
             switch key {
             case "uid":
@@ -83,12 +95,15 @@ struct TarExtendedHeader {
                 self.gname = value
             case "size":
                 self.size = Int(value)
+            // LOCAL PATCH (fork): a time that is not finite or not representable
+            // in whole seconds (`nan`, `inf`, `1e300`) is ignored as an
+            // unparsable one is (security audit 2026-11-15, W35).
             case "atime":
-                self.atime = Double(value)
+                self.atime = Double(value).flatMap { TarHeader.wholeSeconds($0) == nil ? nil : $0 }
             case "ctime":
-                self.ctime = Double(value)
+                self.ctime = Double(value).flatMap { TarHeader.wholeSeconds($0) == nil ? nil : $0 }
             case "mtime":
-                self.mtime = Double(value)
+                self.mtime = Double(value).flatMap { TarHeader.wholeSeconds($0) == nil ? nil : $0 }
             case "path":
                 self.path = value
             case "linkpath":
@@ -146,7 +161,10 @@ struct TarExtendedHeader {
         if asciiNameData == nil || asciiNameData!.count > 100 {
             self.path = info.name
         }
-        let asciiLinkNameData = info.name.data(using: .ascii)
+        // LOCAL PATCH (fork): the link name's own length decides, not the
+        // name's; a long link name behind a short name was cut to 100 bytes
+        // (security audit 2026-11-15, W42).
+        let asciiLinkNameData = info.linkName.data(using: .ascii)
         if asciiLinkNameData == nil || asciiLinkNameData!.count > 100 {
             self.linkpath = info.linkName
         }

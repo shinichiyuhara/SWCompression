@@ -26,6 +26,7 @@ public class SevenZipContainer: Container {
      - Returns: Array of `SevenZipEntry`.
      */
     public static func open(container data: Data) throws -> [SevenZipEntry] {
+        let data = data.zeroBased // LOCAL PATCH (fork): W39
         var entries = [SevenZipEntry]()
         guard let header = try readHeader(data),
             let files = header.fileInfo?.files
@@ -216,6 +217,7 @@ public class SevenZipContainer: Container {
      - Returns: Array of `SevenZipEntryInfo`.
      */
     public static func info(container data: Data) throws -> [SevenZipEntryInfo] {
+        let data = data.zeroBased // LOCAL PATCH (fork): W39
         var entries = [SevenZipEntryInfo]()
         guard let header = try readHeader(data),
             let files = header.fileInfo?.files
@@ -231,7 +233,9 @@ public class SevenZipContainer: Container {
                 entries.append(SevenZipEntryInfo(file, size, crc))
                 nonEmptyFileIndex += 1
             } else {
-                let info = file.isEmptyFile ? SevenZipEntryInfo(file, 0) : SevenZipEntryInfo(file)
+                // LOCAL PATCH (fork): an anti item gets no size, as `open` gives
+                // it no data; `info` said size 0 (security audit 2026-11-15, W41).
+                let info = file.isEmptyFile && !file.isAntiFile ? SevenZipEntryInfo(file, 0) : SevenZipEntryInfo(file)
                 entries.append(info)
             }
         }
@@ -252,6 +256,7 @@ public class SevenZipContainer: Container {
      - Throws: `SevenZipError` if the header cannot be read.
      */
     public static func folderUnpackSizes(container data: Data) throws -> [Int] {
+        let data = data.zeroBased // LOCAL PATCH (fork): W39
         guard let header = try readHeader(data),
               let folders = header.mainStreams?.coderInfo.folders
             else { return [] }

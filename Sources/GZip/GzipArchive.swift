@@ -233,7 +233,10 @@ public class GzipArchive: Archive {
 
         var mtimeBytes: [UInt8] = [0, 0, 0, 0]
         if let modificationTime = modificationTime {
-            let timeInterval = Int(modificationTime.timeIntervalSince1970)
+            // LOCAL PATCH (fork): `Int(_:)` trapped on a time that is not finite
+            // or does not fit; such a time is written as 0, "unknown" (security
+            // audit 2026-11-15, W35).
+            let timeInterval = Int(exactly: modificationTime.timeIntervalSince1970.rounded(.down)) ?? 0
             for i in 0..<4 {
                 mtimeBytes[i] = UInt8(truncatingIfNeeded: (timeInterval & (0xFF << (i * 8))) >> (i * 8))
             }

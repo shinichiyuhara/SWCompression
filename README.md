@@ -242,6 +242,7 @@ which are refused.
 | `sy.16` | Deflate, LZ4, LZMA and LZMA2 traps reachable as 7-Zip coders; LZMA with pb=4 decodes |
 | `sy.17` | GZip extra field, XZ block header and padding, and .lzma header size traps |
 | `sy.18` | `limit:` on every decoder; limited gzip/bzip2 read every member; Huffman trees sized by their codes; 7z folders unpacked once; BCJ past 4 GiB; truncated .lzma ends |
+| `sy.19` | TAR octal fields, PAX names and times; 7z Unix mode bit and anti items; LZ4 blocks in place; XZ filter order; slices accepted |
 
 Sections 1–3 describe `sy.1` and `sy.2`, section 4 the rest.
 
@@ -442,13 +443,28 @@ preloading, Arkheion's Quick Look):
   path reserves at most 64 MiB up front, and a truncated .lzma of unknown
   size ends with an error instead of zeros without end.
 
+- **Interpretation and smaller bounds** (`sy.19`): TAR reads an octal field
+  filled to its last byte (GNU tar's 12-digit sizes lost their last digit),
+  refuses a PAX `path`, `linkpath` or `size` that is not UTF-8 or holds a
+  NUL instead of falling back to the basic header, ignores PAX times that are
+  not finite whole seconds, and the TAR and gzip writers no longer trap on
+  such times. A 7-Zip file's upper attribute bits are a Unix mode only with
+  the Unix-extension bit (0x8000), and an anti item has no size in `info()`
+  as it has no data in `open()`. XZ requires LZMA2 last and only last. LZ4
+  decodes blocks into the frame's output rather than copying 64 KiB per
+  dependent block, and BZip2 holds its run-length stage to `limit`. 7-Zip,
+  TAR and ZIP accept a slice of a larger `Data`. Permissions are returned as
+  stored, setuid included: hosts should mask them before applying.
+
 ### Verification
 
-From `sy.16` (and again at `sy.17` and `sy.18`), a corpus made with `7zz`, `xz`, `bzip2` and `gzip` (twelve 7z
+From `sy.16` (and again at `sy.17`–`sy.19`), a corpus made with `7zz`, `xz`, `bzip2` and `gzip` (twelve 7z
 method chains including BCJ, ARM64, Delta, Deflate, BZip2, LZMA and LZMA2 with
 `pb=4`, plus .xz with and without `pb=4`, .lzma, .bz2 and .gz of the same five
 files) decodes byte-identically: 85 files, of which two went through the
-pure-Swift fallback inside 7z.
+pure-Swift fallback inside 7z. From `sy.19` it also holds seven LZ4 frames
+made with `lz4 -BD` (dependent blocks) and ustar and pax tars from bsdtar:
+104 files, all identical.
 
 The changes of sections 1–3 were validated by extracting real archives and
 comparing every output file against `7zz`: 4,796 files, zero mismatches, and

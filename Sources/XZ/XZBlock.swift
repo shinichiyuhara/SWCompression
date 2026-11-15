@@ -62,7 +62,13 @@ struct XZBlock {
         try headerFieldsFit()
 
         var filters: [(LittleEndianByteReader) throws -> Data] = []
-        for _ in 0..<filtersCount {
+        // LOCAL PATCH (fork): as the .xz format requires, LZMA2 must be the last
+        // filter and only the last. Up to four LZMA2 stages each decoded up to
+        // `limit`, and a chain ending in Delta was decoded too (security audit
+        // 2026-11-15, W43). With LZMA2 once at the end, the Delta stages before
+        // it keep the size, so the output is bounded by `limit`.
+        for filterIndex in 0..<filtersCount {
+            let isLastFilter = filterIndex == filtersCount - 1
             let filterID = try byteReader.multiByteDecode()
             try headerFieldsFit()
             guard UInt64(filterID) < 0x4000000000000000
@@ -70,6 +76,8 @@ struct XZBlock {
             // Only LZMA2 filter is supported.
             switch filterID {
             case 0x21:
+                guard isLastFilter
+                    else { throw XZError.wrongFilterID }
                 // First, we need to check if size of LZMA2 filter's properties is equal to 1 as expected.
                 let propertiesSize = try byteReader.multiByteDecode()
                 guard propertiesSize == 1
@@ -79,6 +87,8 @@ struct XZBlock {
                 let filterPropeties = byteReader.byte()
                 filters.append { try LZMA2.decompress($0, filterPropeties, limit: limit) }
             case 0x03:
+                guard !isLastFilter
+                    else { throw XZError.wrongFilterID }
                 // First, we need to check if size of Delta filter's properties is equal to 1 as expected.
                 let propertiesSize = try byteReader.multiByteDecode()
                 guard propertiesSize == 1

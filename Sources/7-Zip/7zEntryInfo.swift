@@ -63,8 +63,13 @@ public struct SevenZipEntryInfo: ContainerEntryInfo {
 
         self.winAttributes = file.winAttributes
 
+        // LOCAL PATCH (fork): the upper 16 bits hold a Unix mode only when
+        // 7-Zip's FILE_ATTRIBUTE_UNIX_EXTENSION (0x8000) says so; otherwise
+        // they are whatever the writer left there and were read as a file type
+        // and permissions anyway (security audit 2026-11-15, W40).
+        let unixMode = self.winAttributes.flatMap { $0 & 0x8000 != 0 ? $0 >> 16 : nil }
         if let attributes = self.winAttributes {
-            self.permissions = Permissions(rawValue: (0x0FFF0000 & attributes) >> 16)
+            self.permissions = unixMode.map { Permissions(rawValue: 0x0FFF & $0) }
             self.dosAttributes = DosAttributes(rawValue: 0xFF & attributes)
         } else {
             self.permissions = nil
@@ -72,8 +77,8 @@ public struct SevenZipEntryInfo: ContainerEntryInfo {
         }
 
         // Set entry type.
-        if let attributes = self.winAttributes,
-            let unixType = ContainerEntryType((0xF0000000 & attributes) >> 16) {
+        if let unixMode = unixMode,
+            let unixType = ContainerEntryType(0xF000 & unixMode) {
             self.type = unixType
         } else if let dosAttributes = self.dosAttributes {
             if dosAttributes.contains(.directory) {
